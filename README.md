@@ -121,7 +121,20 @@ If `VENT_MCP_CONFIG` points to a missing file, startup fails.
 
 See [configs/config.sample.toml](configs/config.sample.toml).
 
-## Sinks
+## Channels, Sinks, Providers
+
+`vent-mcp` keeps routing deliberately simple:
+
+- A **channel** is a label on the event. The agent can choose one, or omit it and
+  use `default_channel`.
+- A **sink** is a delivery destination. Every vent is sent to every configured
+  sink.
+- A **provider** is a webhook payload shape. For example,
+  `provider = "discord"` formats the event for a Discord incoming webhook.
+
+Sink names and channel names do not have to match. A sink named `discord` does
+not mean only the `discord` channel goes there. It means that sink will be
+reported as `discord` in delivery status.
 
 The default `log` sink writes JSONL events to `vents.jsonl` beside the config
 file. If `[logging].jsonl_dir` is set, JSONL events are written there instead.
@@ -144,18 +157,37 @@ Each event includes an id, UTC timestamp, channel, message, and the project
 directory name. It does not include the full current working directory path.
 
 Header values are read from environment variables. Webhook requests default to a
-10 second timeout; set `timeout_ms` to override that per sink.
+10 second timeout; set `timeout_ms` to override that per sink. Discord incoming
+webhook URLs normally do not need extra headers.
 
-```toml
-[[sinks]]
-type = "webhook"
-name = "relay"
-url = "https://example.com/vent"
-timeout_ms = 10000
-headers = [
-  { name = "Authorization", env = "VENT_MCP_WEBHOOK_AUTHORIZATION" },
-]
+### Keep JSONL Logging And Add Discord
+
+Start from the generated config or [configs/config.sample.toml](configs/config.sample.toml).
+Keep the `log` sink, then add one webhook sink:
+
+```diff
+ [[sinks]]
+ type = "jsonl"
+ name = "log"
+ 
++[[sinks]]
++type = "webhook"
++name = "discord"
++provider = "discord"
++url = "https://discord.com/api/webhooks/..."
++timeout_ms = 10000
 ```
+
+The built-in `discord` provider maps `message` to Discord `content` and adds
+`channel` and `project` as embed fields. You do not need to add a
+`[providers.discord]` block unless you want to customize that payload.
+
+With the config above, the same event is written to `vents.jsonl` and posted to
+Discord. The event keeps whichever channel label the agent used.
+
+The `default_channel` value must match one declared `[[channels]]` entry.
+
+### Custom Provider Maps
 
 Provider maps live in the same TOML config file. The left side is a vent event
 field and the value is the dotted output JSON path. Numeric path segments create
@@ -174,127 +206,5 @@ type = "webhook"
 name = "discord"
 provider = "discord"
 url = "https://discord.com/api/webhooks/..."
-```
-
-### Built-In Provider Defaults
-
-`vent-mcp` ships a sane preconfigured provider list for common webhook receivers
-in North America and Europe. These defaults are ready to use from the generated
-config and [configs/config.sample.toml](configs/config.sample.toml): pick a
-provider, add the webhook URL, and keep the mapping as-is unless the receiving
-workflow needs a custom shape.
-
-Automation hubs receive the full raw event. Chat providers receive the smallest
-useful message shape their incoming webhook supports.
-
-| Provider | Target | Default payload |
-| --- | --- | --- |
-| `zapier` | [Webhooks by Zapier](https://help.zapier.com/hc/en-us/articles/8496288690317-Trigger-Zap-workflows-from-webhooks) | Raw event fields |
-| `make` | [Make webhooks](https://help.make.com/webhooks) | Raw event fields |
-| `n8n` | [n8n Webhook node](https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.webhook/) | Raw event fields |
-| `pipedream` | [Pipedream HTTP triggers](https://pipedream.com/docs/workflows/building-workflows/triggers/) | Raw event fields |
-| `workato` | [Workato webhooks](https://docs.workato.com/connectors/workato-webhooks.html) | Raw event fields |
-| `ifttt` | [IFTTT Webhooks](https://help.ifttt.com/hc/en-us/articles/115010230347-Webhooks-service-FAQ) | `value1`, `value2`, `value3` |
-| `slack` | [Slack incoming webhooks](https://api.slack.com/messaging/webhooks) | `text` plus attachment fields |
-| `mattermost` | [Mattermost incoming webhooks](https://developers.mattermost.com/integrate/webhooks/incoming/) | `text` plus attachment fields |
-| `discord` | [Discord Execute Webhook](https://docs.discord.com/developers/resources/webhook#execute-webhook) | `content` plus embed fields |
-| `microsoft_teams` | [Microsoft Teams incoming webhooks](https://learn.microsoft.com/en-us/microsoftteams/platform/webhooks-and-connectors/how-to/add-incoming-webhook) | `text` |
-| `google_chat` | [Google Chat incoming webhooks](https://developers.google.com/workspace/chat/quickstart/webhooks) | `text` |
-| `webex` | [Webex incoming webhooks](https://apphub.webex.com/applications/incoming-webhooks-cisco-systems-38054-23307-75252) | `markdown` |
-
-Telegram, WhatsApp Business, PagerDuty, and Opsgenie are not built-in defaults
-yet. They are useful targets, but they need static required fields or secrets
-outside the current dynamic field mapper: chat or recipient ids, message type
-constants, routing keys, event actions, bearer tokens, or API keys.
-
-### Zapier
-
-Use a Zapier Catch Hook when you want Zapier to parse the JSON fields, or Catch
-Raw Hook when later Zap steps should receive the whole JSON body.
-
-```toml
-[providers.zapier]
-id = "id"
-timestamp = "timestamp"
-channel = "channel"
-message = "message"
-project = "project"
-
-[[sinks]]
-type = "webhook"
-name = "zapier"
-provider = "zapier"
-url = "https://hooks.zapier.com/hooks/catch/123456/abcdef/"
-timeout_ms = 10000
-```
-
-Zapier accepts valid JSON webhook payloads, so the default `vent-mcp` event body
-can be sent directly.
-
-The same raw mapping is used for `make`, `n8n`, `pipedream`, and `workato`.
-
-### Slack
-
-The default Slack provider maps `message` to the top-level `text` fallback and
-maps `channel`/`project` into attachment fields. Mattermost uses the same
-Slack-compatible mapping.
-
-```toml
-[providers.slack]
-field_label_key = "title"
-message = "text"
-channel = "attachments.0.fields.0.value"
-project = "attachments.0.fields.1.value"
-
-[[sinks]]
-type = "webhook"
-name = "slack"
-provider = "slack"
-url = "https://hooks.slack.com/services/..."
-timeout_ms = 10000
-headers = [
-  { name = "Authorization", env = "VENT_MCP_SLACK_WEBHOOK_AUTHORIZATION" },
-]
-```
-
-### Discord
-
-Discord expects at least one message field such as `content`, `embeds`,
-`components`, a file, or a poll. The default Discord provider maps `message` to
-`content` and maps `channel`/`project` into generated embed fields.
-
-```toml
-[providers.discord]
-field_label_key = "name"
-message = "content"
-channel = "embeds.0.fields.0.value"
-project = "embeds.0.fields.1.value"
-
-[[sinks]]
-type = "webhook"
-name = "discord"
-provider = "discord"
-url = "https://discord.com/api/webhooks/..."
-timeout_ms = 10000
-headers = [
-  { name = "Authorization", env = "VENT_MCP_DISCORD_WEBHOOK_AUTHORIZATION" },
-]
-```
-
-### Text Webhooks
-
-Microsoft Teams, Google Chat, and Webex use message-only provider maps because
-their simple incoming webhook paths accept a single text or markdown body. The
-same sink shape works for all three:
-
-```toml
-[providers.microsoft_teams]
-message = "text"
-
-[[sinks]]
-type = "webhook"
-name = "microsoft_teams"
-provider = "microsoft_teams"
-url = "https://..."
 timeout_ms = 10000
 ```
