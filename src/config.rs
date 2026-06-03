@@ -1078,6 +1078,29 @@ name = "log"
         ));
     }
 
+    /// Verifies sink definitions must have explicit names for channel routing.
+    #[test]
+    fn config_validation_rejects_unnamed_sinks() {
+        let raw = r#"
+default_channel = "general"
+
+[[channels]]
+name = "general"
+description = "General feedback."
+sinks = ["log"]
+
+[[sinks]]
+type = "jsonl"
+"#;
+
+        let error = AppConfig::from_toml_str(raw).expect_err("config should fail");
+        assert!(matches!(
+            error.into_validation(),
+            Some(ConfigValidationError::InvalidChannelName { field, .. })
+                if field == "sinks.name"
+        ));
+    }
+
     /// Verifies webhook TOML parses headers, provider references, and timeout values.
     #[test]
     #[cfg(feature = "webhook")]
