@@ -125,20 +125,27 @@ See [configs/config.sample.toml](configs/config.sample.toml).
 
 `vent-mcp` keeps routing deliberately simple:
 
-- A **channel** is a label on the event. The agent can choose one, or omit it and
-  use `default_channel`.
-- A **sink** is a delivery destination. Every vent is sent to every configured
-  sink.
+- A **channel** is the route the agent can choose, or omit to use
+  `default_channel`. Each channel names one or more sinks.
+- A **sink** is a concrete delivery destination, such as local JSONL logging or a
+  specific Discord incoming webhook.
 - A **provider** is a webhook payload shape. For example,
   `provider = "discord"` formats the event for a Discord incoming webhook.
 
-Sink names and channel names do not have to match. A sink named `discord` does
-not mean only the `discord` channel goes there. It means that sink will be
-reported as `discord` in delivery status.
+Sink names and channel names do not have to match. A channel named `ci` can
+target a sink named `discord-ci`, `log`, or both:
+
+```toml
+[[channels]]
+name = "ci"
+description = "Feedback about tests, builds, CI, or automation failures."
+sinks = ["log", "discord-ci"]
+```
 
 The default `log` sink writes JSONL events to `vents.jsonl` beside the config
 file. If `[logging].jsonl_dir` is set, JSONL events are written there instead.
-If a config has no sinks, `vent` uses the built-in `log` JSONL sink.
+Every sink must have a unique `name`, and every channel must reference at least
+one defined sink.
 
 Webhook sinks POST the vent event as JSON. With no provider, the raw event is
 sent unchanged:
@@ -160,30 +167,37 @@ Header values are read from environment variables. Webhook requests default to a
 10 second timeout; set `timeout_ms` to override that per sink. Discord incoming
 webhook URLs normally do not need extra headers.
 
-### Keep JSONL Logging And Add Discord
+### Route CI Vents To Discord
 
 Start from the generated config or [configs/config.sample.toml](configs/config.sample.toml).
-Keep the `log` sink, then add one webhook sink:
+Keep the `log` sink, add one Discord sink, then route the `ci` channel to both:
 
 ```diff
+ [[channels]]
+ name = "ci"
+ description = "Feedback about tests, builds, CI, or automation failures."
+-sinks = ["log"]
++sinks = ["log", "discord-ci"]
+
  [[sinks]]
  type = "jsonl"
  name = "log"
  
 +[[sinks]]
 +type = "webhook"
-+name = "discord"
++name = "discord-ci"
 +provider = "discord"
 +url = "https://discord.com/api/webhooks/..."
 +timeout_ms = 10000
 ```
 
 The built-in `discord` provider maps `message` to Discord `content` and adds
-`channel` and `project` as embed fields. You do not need to add a
-`[providers.discord]` block unless you want to customize that payload.
+`project` as an embed field. It does not include the channel name by default,
+because the channel is routing metadata. You do not need to add a
+`[providers.discord]` block unless you want to customize the payload.
 
-With the config above, the same event is written to `vents.jsonl` and posted to
-Discord. The event keeps whichever channel label the agent used.
+With the config above, `channel = "ci"` vents are written to `vents.jsonl` and
+posted to Discord. Other channels go only to the sinks they list.
 
 The `default_channel` value must match one declared `[[channels]]` entry.
 
@@ -198,12 +212,11 @@ generated from the source key, such as `channel` to `Channel`.
 [providers.discord]
 field_label_key = "name"
 message = "content"
-channel = "embeds.0.fields.0.value"
-project = "embeds.0.fields.1.value"
+project = "embeds.0.fields.0.value"
 
 [[sinks]]
 type = "webhook"
-name = "discord"
+name = "discord-ci"
 provider = "discord"
 url = "https://discord.com/api/webhooks/..."
 timeout_ms = 10000

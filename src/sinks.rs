@@ -1,11 +1,12 @@
 //! Delivery sink dispatch for persisted and webhook-backed vent events.
 //!
 //! Sinks are the last boundary before a vent leaves the MCP server. This module
-//! fans one validated event out to every configured destination, reports each
-//! result independently, and keeps delivery mechanics explicit: JSONL writes are
-//! serialized to avoid interleaved records, webhook headers come from environment
-//! variables, and provider mappings turn the canonical event into receiver-shaped
-//! JSON only after configuration validation has constrained the paths.
+//! fans one validated event out to the destinations named by the selected
+//! channel, reports each result independently, and keeps delivery mechanics
+//! explicit: JSONL writes are serialized to avoid interleaved records, webhook
+//! headers come from environment variables, and provider mappings turn the
+//! canonical event into receiver-shaped JSON only after configuration validation
+//! has constrained the paths.
 
 #[cfg(feature = "webhook")]
 use std::env;
@@ -84,28 +85,25 @@ impl SinkDispatcher {
         }
     }
 
-    /// Sends an event to every configured sink and returns per-sink delivery status.
+    /// Sends an event to the sinks configured for its channel.
     ///
-    /// Dispatch is concurrent across sink entries, but each JSONL write still uses
-    /// an internal lock so records remain one complete line at a time.
+    /// Dispatch is concurrent across the channel's sink entries, but each JSONL
+    /// write still uses an internal lock so records remain one complete line at a
+    /// time.
     pub async fn dispatch(&self, event: &VentEvent) -> Vec<SinkDeliveryStatus> {
-        join_all(
-            self.config
-                .sinks()
-                .iter()
-                .enumerate()
-                .map(|(index, sink)| self.dispatch_one(sink, index, event)),
-        )
-        .await
+        let Some(sinks) = self.config.sinks_for_channel(&event.channel) else {
+            return vec![failed_status(
+                event.channel.clone(),
+                format!("unknown channel: {}", event.channel),
+            )];
+        };
+
+        join_all(sinks.into_iter().map(|sink| self.dispatch_one(sink, event))).await
     }
 
-    async fn dispatch_one(
-        &self,
-        sink: &SinkConfig,
-        index: usize,
-        event: &VentEvent,
-    ) -> SinkDeliveryStatus {
-        let label = sink_label(sink, index);
+    /// Sends an event to one resolved sink definition.
+    async fn dispatch_one(&self, sink: &SinkConfig, event: &VentEvent) -> SinkDeliveryStatus {
+        let label = sink_label(sink);
         match sink {
             SinkConfig::Jsonl(_) => self.write_jsonl(event, label).await,
             #[cfg(feature = "webhook")]
@@ -373,18 +371,9 @@ fn webhook_headers(config: &WebhookSinkConfig) -> Result<HeaderMap, String> {
     Ok(headers)
 }
 
-/// Produces a stable sink label, adding an index suffix for repeated sink kinds.
-fn sink_label(sink: &SinkConfig, index: usize) -> String {
-    if let Some(name) = sink.name().filter(|name| !name.is_empty()) {
-        return name.to_string();
-    }
-
-    let suffix = index + 1;
-    if suffix == 1 {
-        sink.kind().to_string()
-    } else {
-        format!("{}#{suffix}", sink.kind())
-    }
+/// Produces the stable sink label used in delivery status.
+fn sink_label(sink: &SinkConfig) -> String {
+    sink.name().to_string()
 }
 
 /// Creates a failed sink delivery status with a human-readable message.
@@ -410,9 +399,11 @@ mod tests {
 
     use tempfile::tempdir;
 
-    use crate::config::{AppConfig, LoggingConfig, RuntimeConfig};
+    use crate::config::{
+        AppConfig, ChannelConfig, JsonlSinkConfig, LoggingConfig, RuntimeConfig, SinkConfig,
+    };
     #[cfg(feature = "webhook")]
-    use crate::config::{ChannelConfig, SinkConfig, WebhookHeaderConfig, WebhookSinkConfig};
+    use crate::config::{WebhookHeaderConfig, WebhookSinkConfig};
     use crate::types::VentEvent;
 
     #[cfg(feature = "webhook")]
@@ -506,28 +497,48 @@ mod tests {
         assert_eq!(decoded.project, "vent-mcp");
     }
 
-    /// Verifies an empty sink list falls back to the built-in local log sink.
+    /// Verifies channel routes dispatch only to the sinks named by that channel.
     #[tokio::test]
-    async fn empty_sink_list_uses_implicit_log_sink() {
+    async fn dispatch_uses_selected_channel_sinks() {
         let dir = tempdir().expect("temp dir");
         let config = AppConfig {
+            default_channel: "general".to_string(),
             logging: LoggingConfig {
                 jsonl_dir: Some(dir.path().to_string_lossy().to_string()),
             },
-            sinks: Vec::new(),
+            channels: vec![
+                ChannelConfig {
+                    name: "general".to_string(),
+                    description: "General feedback.".to_string(),
+                    sinks: vec!["log".to_string()],
+                },
+                ChannelConfig {
+                    name: "ci".to_string(),
+                    description: "CI feedback.".to_string(),
+                    sinks: vec!["audit".to_string()],
+                },
+            ],
+            sinks: vec![
+                SinkConfig::Jsonl(JsonlSinkConfig {
+                    name: "log".to_string(),
+                }),
+                SinkConfig::Jsonl(JsonlSinkConfig {
+                    name: "audit".to_string(),
+                }),
+            ],
             ..AppConfig::default()
         };
         let dispatcher = SinkDispatcher::new(runtime_config(config, dir.path()));
         let event = VentEvent::new(
-            "general".to_string(),
-            "No explicit sinks were configured.".to_string(),
+            "ci".to_string(),
+            "The CI logs were hard to correlate.".to_string(),
             "vent-mcp".to_string(),
         );
 
         let statuses = dispatcher.dispatch(&event).await;
 
         assert_eq!(statuses.len(), 1);
-        assert_eq!(statuses[0].sink, "log");
+        assert_eq!(statuses[0].sink, "audit");
         assert!(statuses[0].ok);
         assert!(dir.path().join("vents.jsonl").exists());
     }
@@ -544,9 +555,10 @@ mod tests {
             channels: vec![ChannelConfig {
                 name: "general".to_string(),
                 description: "General feedback.".to_string(),
+                sinks: vec!["webhook".to_string()],
             }],
             sinks: vec![SinkConfig::Webhook(WebhookSinkConfig {
-                name: None,
+                name: "webhook".to_string(),
                 url: "https://example.com/vent".to_string(),
                 provider: None,
                 timeout_ms: 2500,
@@ -594,13 +606,14 @@ mod tests {
         let sender = Arc::new(RecordingWebhookSender::default());
 
         let config = AppConfig {
-            default_channel: "general".to_string(),
+            default_channel: "ci".to_string(),
             channels: vec![ChannelConfig {
-                name: "general".to_string(),
-                description: "General feedback.".to_string(),
+                name: "ci".to_string(),
+                description: "CI feedback.".to_string(),
+                sinks: vec!["discord-ci".to_string()],
             }],
             sinks: vec![SinkConfig::Webhook(WebhookSinkConfig {
-                name: None,
+                name: "discord-ci".to_string(),
                 url: "https://example.com/discord".to_string(),
                 provider: Some("discord".to_string()),
                 timeout_ms: 2500,
@@ -628,17 +641,13 @@ mod tests {
         assert_eq!(calls[0].payload["content"], event.message);
         assert_eq!(
             calls[0].payload["embeds"][0]["fields"][0]["name"],
-            "Channel"
-        );
-        assert_eq!(calls[0].payload["embeds"][0]["fields"][0]["value"], "ci");
-        assert_eq!(
-            calls[0].payload["embeds"][0]["fields"][1]["name"],
             "Project"
         );
         assert_eq!(
-            calls[0].payload["embeds"][0]["fields"][1]["value"],
+            calls[0].payload["embeds"][0]["fields"][0]["value"],
             "vent-mcp"
         );
+        assert!(!calls[0].payload.to_string().contains("ci"));
     }
 
     /// Verifies non-2xx webhook errors redact known secret values and cap body previews.

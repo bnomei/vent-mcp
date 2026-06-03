@@ -10,14 +10,17 @@ default_channel = "general"
 [[channels]]
 name = "general"
 description = "General agent feedback and complaints."
+sinks = ["log"]
 
 [[channels]]
 name = "ux"
 description = "Feedback about confusing workflows, tool friction, or user experience problems."
+sinks = ["log"]
 
 [[channels]]
 name = "ci"
 description = "Feedback about tests, builds, CI, or automation failures."
+sinks = ["log"]
 
 # Automation hubs that accept arbitrary JSON.
 [providers.zapier]
@@ -65,20 +68,17 @@ project = "value3"
 [providers.slack]
 field_label_key = "title"
 message = "text"
-channel = "attachments.0.fields.0.value"
-project = "attachments.0.fields.1.value"
+project = "attachments.0.fields.0.value"
 
 [providers.mattermost]
 field_label_key = "title"
 message = "text"
-channel = "attachments.0.fields.0.value"
-project = "attachments.0.fields.1.value"
+project = "attachments.0.fields.0.value"
 
 [providers.discord]
 field_label_key = "name"
 message = "content"
-channel = "embeds.0.fields.0.value"
-project = "embeds.0.fields.1.value"
+project = "embeds.0.fields.0.value"
 
 # Text-only chat receivers.
 [providers.microsoft_teams]
@@ -96,10 +96,10 @@ name = "log"
 
 # [[sinks]]
 # type = "webhook"
-# name = "slack"
-# provider = "slack"
-# url = "https://example.com/vent"
+# name = "discord-ci"
+# provider = "discord"
+# url = "https://discord.com/api/webhooks/..."
 # timeout_ms = 10000
-# headers = [
-#   { name = "Authorization", env = "VENT_MCP_WEBHOOK_AUTHORIZATION" },
-# ]
+#
+# To route CI vents to this sink, add it to that channel:
+# sinks = ["log", "discord-ci"]

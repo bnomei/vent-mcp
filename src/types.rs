@@ -3,9 +3,9 @@
 //! This module defines the narrow contract between MCP tools, the optional CLI,
 //! and delivery sinks. The types keep the tool surface intentionally small: a
 //! caller can send a message, optionally choose a configured channel, and receive
-//! explicit sink delivery status. Event construction also limits project context
-//! to the directory name so feedback can be useful without recording a full local
-//! path.
+//! a concise acknowledgement or first delivery error. Event construction also
+//! limits project context to the directory name so feedback can be useful without
+//! recording a full local path.
 
 use std::env;
 

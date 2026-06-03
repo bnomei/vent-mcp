@@ -70,10 +70,12 @@ jsonl_dir = "{}"
 [[channels]]
 name = "general"
 description = "General feedback."
+sinks = ["log"]
 
 [[channels]]
 name = "ux"
 description = "Workflow friction."
+sinks = ["log"]
 
 [[sinks]]
 type = "jsonl"

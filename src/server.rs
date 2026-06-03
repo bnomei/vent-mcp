@@ -4,7 +4,7 @@
 //! to MCP clients. The server keeps the external surface deliberately constrained:
 //! clients can inspect channels only when there is something meaningful to choose
 //! from, vents are rejected before dispatch when the message or channel is
-//! invalid, and returned sink statuses make delivery outcomes explicit.
+//! invalid, and delivery failures are reduced to one concise error for callers.
 
 use rmcp::handler::server::tool::{schema_for_type, ToolRouter};
 use rmcp::handler::server::wrapper::{Json, Parameters};
@@ -52,9 +52,8 @@ impl VentMcpServer {
     /// Validates and dispatches a feedback message to the requested channel.
     ///
     /// Empty messages and unknown channels are converted into structured failure
-    /// outputs instead of reaching configured sinks. Successful requests share a
-    /// single event record across all sinks so their delivery statuses describe
-    /// the same vent.
+    /// outputs instead of reaching configured sinks. Successful requests dispatch
+    /// one event record through the sinks named by the selected channel.
     #[tool(
         name = "vent",
         description = "Escalate workflow feedback to a human when something failed or caused friction. Summarize what you tried to achieve, where it failed, and what you expected.",
@@ -173,10 +172,12 @@ mod tests {
                 ChannelConfig {
                     name: "general".to_string(),
                     description: "General feedback.".to_string(),
+                    sinks: vec!["log".to_string()],
                 },
                 ChannelConfig {
                     name: "ux".to_string(),
                     description: "Workflow friction.".to_string(),
+                    sinks: vec!["log".to_string()],
                 },
             ],
             ..AppConfig::default()
@@ -203,10 +204,12 @@ mod tests {
                 ChannelConfig {
                     name: "general".to_string(),
                     description: "General feedback.".to_string(),
+                    sinks: vec!["log".to_string()],
                 },
                 ChannelConfig {
                     name: "ux".to_string(),
                     description: "Workflow friction.".to_string(),
+                    sinks: vec!["log".to_string()],
                 },
             ],
             ..AppConfig::default()

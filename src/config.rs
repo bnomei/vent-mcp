@@ -104,6 +104,7 @@ pub struct RuntimeConfig {
     #[cfg(feature = "webhook")]
     providers: BTreeMap<String, ProviderTemplate>,
     sinks: Vec<SinkConfig>,
+    sinks_by_name: BTreeMap<String, usize>,
     config_dir: PathBuf,
     jsonl_dir: PathBuf,
 }
@@ -127,11 +128,11 @@ impl RuntimeConfig {
         #[cfg(not(feature = "webhook"))]
         let _ = raw_providers;
 
-        let sinks = if sinks.is_empty() {
-            vec![default_log_sink()]
-        } else {
-            sinks
-        };
+        let sinks_by_name = sinks
+            .iter()
+            .enumerate()
+            .map(|(index, sink)| (sink.name().to_string(), index))
+            .collect();
         let jsonl_dir = resolve_jsonl_dir(&logging, &config_dir);
 
         Ok(Self {
@@ -141,6 +142,7 @@ impl RuntimeConfig {
             #[cfg(feature = "webhook")]
             providers,
             sinks,
+            sinks_by_name,
             config_dir,
             jsonl_dir,
         })
@@ -176,8 +178,24 @@ impl RuntimeConfig {
         }
     }
 
-    pub(crate) fn sinks(&self) -> &[SinkConfig] {
-        &self.sinks
+    pub(crate) fn sinks_for_channel(&self, channel_name: &str) -> Option<Vec<&SinkConfig>> {
+        let channel = self
+            .channels
+            .iter()
+            .find(|channel| channel.name == channel_name)?;
+        Some(
+            channel
+                .sinks
+                .iter()
+                .map(|sink| {
+                    let index = self
+                        .sinks_by_name
+                        .get(sink)
+                        .expect("validated channel sink reference");
+                    &self.sinks[*index]
+                })
+                .collect(),
+        )
     }
 
     pub(crate) fn jsonl_dir(&self) -> &Path {
@@ -222,6 +240,7 @@ impl Default for AppConfig {
             channels: vec![ChannelConfig {
                 name: "general".to_string(),
                 description: "General agent feedback and complaints.".to_string(),
+                sinks: vec![DEFAULT_LOG_SINK_NAME.to_string()],
             }],
             providers: default_webhook_providers(),
             sinks: vec![default_log_sink()],
@@ -277,7 +296,11 @@ impl AppConfig {
         if self.channels.is_empty() {
             return Err(ConfigValidationError::ChannelsMustNotBeEmpty);
         }
-        let mut names = BTreeSet::new();
+        if self.sinks.is_empty() {
+            return Err(ConfigValidationError::SinksMustNotBeEmpty);
+        }
+
+        let mut channel_names = BTreeSet::new();
         for channel in &self.channels {
             validate_channel_name(&channel.name, "channels.name")?;
             if channel.description.trim().is_empty() {
@@ -285,14 +308,29 @@ impl AppConfig {
                     channel: channel.name.clone(),
                 });
             }
-            if !names.insert(channel.name.as_str()) {
+            if channel.sinks.is_empty() {
+                return Err(ConfigValidationError::ChannelSinksMustNotBeEmpty {
+                    channel: channel.name.clone(),
+                });
+            }
+            let mut channel_sinks = BTreeSet::new();
+            for sink in &channel.sinks {
+                validate_provider_name(sink, "channels.sinks")?;
+                if !channel_sinks.insert(sink.as_str()) {
+                    return Err(ConfigValidationError::DuplicateChannelSink {
+                        channel: channel.name.clone(),
+                        sink: sink.clone(),
+                    });
+                }
+            }
+            if !channel_names.insert(channel.name.as_str()) {
                 return Err(ConfigValidationError::DuplicateChannel {
                     channel: channel.name.clone(),
                 });
             }
         }
 
-        if !names.contains(self.default_channel.as_str()) {
+        if !channel_names.contains(self.default_channel.as_str()) {
             return Err(ConfigValidationError::DefaultChannelMustExist {
                 channel: self.default_channel.clone(),
             });
@@ -306,11 +344,21 @@ impl AppConfig {
         let mut sink_names = BTreeSet::new();
         for sink in &self.sinks {
             sink.validate(&self.providers)?;
-            if let Some(name) = sink.name() {
-                validate_provider_name(name, "sinks.name")?;
-                if !sink_names.insert(name) {
-                    return Err(ConfigValidationError::DuplicateSinkName {
-                        sink: name.to_string(),
+            let name = sink.name();
+            validate_provider_name(name, "sinks.name")?;
+            if !sink_names.insert(name) {
+                return Err(ConfigValidationError::DuplicateSinkName {
+                    sink: name.to_string(),
+                });
+            }
+        }
+
+        for channel in &self.channels {
+            for sink in &channel.sinks {
+                if !sink_names.contains(sink.as_str()) {
+                    return Err(ConfigValidationError::UnknownChannelSink {
+                        channel: channel.name.clone(),
+                        sink: sink.clone(),
                     });
                 }
             }
@@ -331,6 +379,8 @@ pub struct LoggingConfig {
 pub struct ChannelConfig {
     pub name: String,
     pub description: String,
+    #[serde(default)]
+    pub sinks: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -357,22 +407,12 @@ impl SinkConfig {
         }
     }
 
-    /// Returns the stable sink kind used in status labels and output messages.
     #[must_use]
-    pub fn kind(&self) -> &'static str {
+    pub fn name(&self) -> &str {
         match self {
-            SinkConfig::Jsonl(_) => "jsonl",
+            SinkConfig::Jsonl(config) => &config.name,
             #[cfg(feature = "webhook")]
-            SinkConfig::Webhook(_) => "webhook",
-        }
-    }
-
-    #[must_use]
-    pub fn name(&self) -> Option<&str> {
-        match self {
-            SinkConfig::Jsonl(config) => config.name.as_deref(),
-            #[cfg(feature = "webhook")]
-            SinkConfig::Webhook(config) => config.name.as_deref(),
+            SinkConfig::Webhook(config) => &config.name,
         }
     }
 }
@@ -380,14 +420,14 @@ impl SinkConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(default, deny_unknown_fields)]
 pub struct JsonlSinkConfig {
-    pub name: Option<String>,
+    pub name: String,
 }
 
 #[cfg(feature = "webhook")]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default, deny_unknown_fields)]
 pub struct WebhookSinkConfig {
-    pub name: Option<String>,
+    pub name: String,
     pub url: String,
     pub provider: Option<String>,
     pub headers: Vec<WebhookHeaderConfig>,
@@ -402,7 +442,7 @@ impl Default for WebhookSinkConfig {
     /// validation can reject configs that omit a real endpoint.
     fn default() -> Self {
         Self {
-            name: None,
+            name: String::new(),
             url: String::new(),
             provider: None,
             headers: Vec::new(),
@@ -550,12 +590,20 @@ pub enum ConfigError {
 pub enum ConfigValidationError {
     #[error("channels must contain at least one channel")]
     ChannelsMustNotBeEmpty,
+    #[error("sinks must contain at least one sink")]
+    SinksMustNotBeEmpty,
     #[error("invalid channel name in {field}: {name}")]
     InvalidChannelName { field: String, name: String },
     #[error("duplicate sink name: {sink}")]
     DuplicateSinkName { sink: String },
     #[error("duplicate channel: {channel}")]
     DuplicateChannel { channel: String },
+    #[error("channel must reference at least one sink: {channel}")]
+    ChannelSinksMustNotBeEmpty { channel: String },
+    #[error("duplicate sink reference in channel {channel}: {sink}")]
+    DuplicateChannelSink { channel: String, sink: String },
+    #[error("unknown sink reference in channel {channel}: {sink}")]
+    UnknownChannelSink { channel: String, sink: String },
     #[error("default channel does not exist: {channel}")]
     DefaultChannelMustExist { channel: String },
     #[error("channel description must not be empty: {channel}")]
@@ -731,7 +779,7 @@ fn validate_provider_name(name: &str, field: &str) -> Result<(), ConfigValidatio
 #[must_use]
 pub(crate) fn default_log_sink() -> SinkConfig {
     SinkConfig::Jsonl(JsonlSinkConfig {
-        name: Some(DEFAULT_LOG_SINK_NAME.to_string()),
+        name: DEFAULT_LOG_SINK_NAME.to_string(),
     })
 }
 
@@ -752,12 +800,7 @@ fn default_webhook_providers() -> BTreeMap<String, WebhookProviderConfig> {
         ("mattermost", slack_like_provider()),
         (
             "discord",
-            labeled_context_provider(
-                "name",
-                "content",
-                "embeds.0.fields.0.value",
-                "embeds.0.fields.1.value",
-            ),
+            labeled_context_provider("name", "content", "embeds.0.fields.0.value"),
         ),
         ("microsoft_teams", text_provider("text")),
         ("google_chat", text_provider("text")),
@@ -790,18 +833,16 @@ fn text_provider(message_path: &str) -> WebhookProviderConfig {
     }
 }
 
-/// Maps message, channel, and project into rich fields with generated labels.
+/// Maps message and project into rich fields with generated labels.
 fn labeled_context_provider(
     label_key: &str,
     message_path: &str,
-    channel_path: &str,
     project_path: &str,
 ) -> WebhookProviderConfig {
     WebhookProviderConfig {
         field_label_key: Some(label_key.to_string()),
         fields: BTreeMap::from([
             ("message".to_string(), message_path.to_string()),
-            ("channel".to_string(), channel_path.to_string()),
             ("project".to_string(), project_path.to_string()),
         ]),
     }
@@ -809,12 +850,7 @@ fn labeled_context_provider(
 
 /// Maps into Slack-compatible attachment fields.
 fn slack_like_provider() -> WebhookProviderConfig {
-    labeled_context_provider(
-        "title",
-        "text",
-        "attachments.0.fields.0.value",
-        "attachments.0.fields.1.value",
-    )
+    labeled_context_provider("title", "text", "attachments.0.fields.0.value")
 }
 
 /// Maps the three Maker Webhooks values IFTTT exposes to applets.
@@ -862,7 +898,6 @@ mod tests {
     use super::SinkConfig;
     use super::{
         resolve_config_path_with, AppConfig, ConfigPathSource, ConfigValidationError, LoadedConfig,
-        RuntimeConfig, DEFAULT_LOG_SINK_NAME,
     };
 
     /// Verifies config path lookup precedence without touching real environment variables.
@@ -909,9 +944,11 @@ default_channel = "missing"
 [[channels]]
 name = "general"
 description = "General feedback."
+sinks = ["log"]
 
 [[sinks]]
 type = "jsonl"
+name = "log"
 "#;
 
         let error = AppConfig::from_toml_str(raw).expect_err("config should fail");
@@ -930,13 +967,16 @@ default_channel = "general"
 [[channels]]
 name = "general"
 description = "General feedback."
+sinks = ["log"]
 
 [[channels]]
 name = "general"
 description = "Duplicate feedback."
+sinks = ["log"]
 
 [[sinks]]
 type = "jsonl"
+name = "log"
 "#;
 
         let error = AppConfig::from_toml_str(raw).expect_err("config should fail");
@@ -946,9 +986,9 @@ type = "jsonl"
         ));
     }
 
-    /// Verifies an explicit empty sink list is valid and dispatch can use the built-in log sink.
+    /// Verifies configs must define at least one sink.
     #[test]
-    fn config_allows_empty_sinks_for_implicit_log() {
+    fn config_validation_rejects_empty_sinks() {
         let raw = r#"
 default_channel = "general"
 sinks = []
@@ -956,15 +996,59 @@ sinks = []
 [[channels]]
 name = "general"
 description = "General feedback."
+sinks = ["log"]
 "#;
 
-        let config = AppConfig::from_toml_str(raw).expect("config should allow empty sinks");
-        assert!(config.sinks.is_empty());
+        let error = AppConfig::from_toml_str(raw).expect_err("config should fail");
+        assert!(matches!(
+            error.into_validation(),
+            Some(ConfigValidationError::SinksMustNotBeEmpty)
+        ));
+    }
 
-        let runtime = RuntimeConfig::from_app_config(config, PathBuf::from("/tmp/vent-mcp"))
-            .expect("runtime config");
-        assert_eq!(runtime.sinks().len(), 1);
-        assert_eq!(runtime.sinks()[0].name(), Some(DEFAULT_LOG_SINK_NAME));
+    /// Verifies every channel must explicitly route to at least one sink.
+    #[test]
+    fn config_validation_rejects_channel_without_sinks() {
+        let raw = r#"
+default_channel = "general"
+
+[[channels]]
+name = "general"
+description = "General feedback."
+
+[[sinks]]
+type = "jsonl"
+name = "log"
+"#;
+
+        let error = AppConfig::from_toml_str(raw).expect_err("config should fail");
+        assert!(matches!(
+            error.into_validation(),
+            Some(ConfigValidationError::ChannelSinksMustNotBeEmpty { .. })
+        ));
+    }
+
+    /// Verifies channel routes must reference known sink definitions.
+    #[test]
+    fn config_validation_rejects_unknown_channel_sink() {
+        let raw = r#"
+default_channel = "general"
+
+[[channels]]
+name = "general"
+description = "General feedback."
+sinks = ["missing"]
+
+[[sinks]]
+type = "jsonl"
+name = "log"
+"#;
+
+        let error = AppConfig::from_toml_str(raw).expect_err("config should fail");
+        assert!(matches!(
+            error.into_validation(),
+            Some(ConfigValidationError::UnknownChannelSink { .. })
+        ));
     }
 
     /// Verifies named sinks are validated and cannot collide.
@@ -976,6 +1060,7 @@ default_channel = "general"
 [[channels]]
 name = "general"
 description = "General feedback."
+sinks = ["log"]
 
 [[sinks]]
 type = "jsonl"
@@ -1003,9 +1088,11 @@ default_channel = "general"
 [[channels]]
 name = "general"
 description = "General feedback."
+sinks = ["slack"]
 
 [[sinks]]
 type = "webhook"
+name = "slack"
 url = "https://example.com/vent"
 provider = "slack"
 timeout_ms = 2500
@@ -1016,7 +1103,6 @@ headers = [
 
         let config = AppConfig::from_toml_str(raw).expect("webhook config");
         assert_eq!(config.sinks.len(), 1);
-        assert_eq!(config.sinks[0].kind(), "webhook");
         let SinkConfig::Webhook(webhook) = &config.sinks[0] else {
             panic!("expected webhook sink");
         };
@@ -1034,9 +1120,11 @@ default_channel = "general"
 [[channels]]
 name = "general"
 description = "General feedback."
+sinks = ["webhook"]
 
 [[sinks]]
 type = "webhook"
+name = "webhook"
 url = "https://example.com/vent"
 "#;
 
@@ -1052,9 +1140,11 @@ default_channel = "general"
 [[channels]]
 name = "general"
 description = "General feedback."
+sinks = ["webhook"]
 
 [[sinks]]
 type = "webhook"
+name = "webhook"
 url = "https://example.com/vent"
 timeout_ms = 0
 "#;
@@ -1075,6 +1165,7 @@ default_channel = "general"
 [[channels]]
 name = "general"
 description = "General feedback."
+sinks = ["webhook"]
 
 [providers.custom]
 message = "data.content.message"
@@ -1082,6 +1173,7 @@ channel = "data.content.channel"
 
 [[sinks]]
 type = "webhook"
+name = "webhook"
 url = "https://example.com/vent"
 provider = "custom"
 "#;
@@ -1095,9 +1187,11 @@ default_channel = "general"
 [[channels]]
 name = "general"
 description = "General feedback."
+sinks = ["webhook"]
 
 [[sinks]]
 type = "webhook"
+name = "webhook"
 url = "https://example.com/vent"
 provider = "missing"
 "#;
@@ -1113,12 +1207,14 @@ default_channel = "general"
 [[channels]]
 name = "general"
 description = "General feedback."
+sinks = ["log"]
 
 [providers.custom]
 unknown = "data.content"
 
 [[sinks]]
 type = "jsonl"
+name = "log"
 "#;
         let error = AppConfig::from_toml_str(invalid_field).expect_err("field should fail");
         assert!(matches!(
@@ -1132,12 +1228,14 @@ default_channel = "general"
 [[channels]]
 name = "general"
 description = "General feedback."
+sinks = ["log"]
 
 [providers.custom]
 message = "data..content"
 
 [[sinks]]
 type = "jsonl"
+name = "log"
 "#;
         let error = AppConfig::from_toml_str(invalid_path).expect_err("path should fail");
         assert!(matches!(
@@ -1192,7 +1290,10 @@ type = "jsonl"
             "text"
         );
         assert_eq!(config.providers["ifttt"].fields["message"], "value1");
-        assert_eq!(config.sinks[0].name(), Some(super::DEFAULT_LOG_SINK_NAME));
+        assert_eq!(config.channels[0].sinks, [super::DEFAULT_LOG_SINK_NAME]);
+        assert_eq!(config.sinks[0].name(), super::DEFAULT_LOG_SINK_NAME);
+        assert!(!config.providers["discord"].fields.contains_key("channel"));
+        assert!(!config.providers["slack"].fields.contains_key("channel"));
     }
 
     trait ConfigErrorExt {
