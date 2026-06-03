@@ -62,6 +62,18 @@ Then configure your MCP client to run:
 }
 ```
 
+### MCP client shortcuts
+
+If `vent` is on your `PATH`, add it as a local STDIO MCP server with:
+
+```bash
+codex mcp add vent -- vent
+claude mcp add --transport stdio vent -- vent
+```
+
+Use an absolute path instead of `vent` if your MCP client does not inherit your
+shell `PATH`.
+
 ## CLI
 
 With no arguments, `vent` runs as the STDIO MCP server.
