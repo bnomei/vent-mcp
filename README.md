@@ -28,11 +28,6 @@ and repeated workflow failures while the context is still fresh.
 cargo install vent-mcp
 ```
 
-### Homebrew
-
-```bash
-brew install bnomei/vent-mcp/vent
-```
 
 ### GitHub Releases
 

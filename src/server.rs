@@ -57,7 +57,7 @@ impl VentMcpServer {
     /// the same vent.
     #[tool(
         name = "vent",
-        description = "Send a non-destructive complaint or feedback message to a configured vent channel.",
+        description = "Escalate workflow feedback to a human when something failed or caused friction. Summarize what you tried to achieve, where it failed, and what you expected.",
         annotations(destructive_hint = false)
     )]
     async fn vent(&self, input: Parameters<VentInput>) -> Json<VentOutput> {
@@ -81,9 +81,9 @@ impl ServerHandler for VentMcpServer {
     /// not told to call a channel-listing tool that has intentionally been hidden.
     fn get_info(&self) -> rmcp::model::ServerInfo {
         let instructions = if self.tool_router.has_route("list_channels") {
-            "Use list_channels to inspect available feedback channels. Use vent to send concise, non-destructive complaints or process feedback. The server records only the project directory name, not the full working directory path."
+            "Use list_channels to inspect available feedback channels. Use vent when something in the workflow needs to be escalated upstream to a human as a complaint or feedback message. Summarize what you tried to achieve, where it failed, and what you expected. The server records only the project directory name, not the full working directory path."
         } else {
-            "Use vent to send concise, non-destructive complaints or process feedback. The server records only the project directory name, not the full working directory path."
+            "Use vent when something in the workflow needs to be escalated upstream to a human as a complaint or feedback message. Summarize what you tried to achieve, where it failed, and what you expected. The server records only the project directory name, not the full working directory path."
         };
 
         rmcp::model::ServerInfo::new(
