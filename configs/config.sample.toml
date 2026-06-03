@@ -1,0 +1,105 @@
+# vent-mcp sample config.
+# Path precedence: VENT_MCP_CONFIG -> $XDG_CONFIG_HOME/vent-mcp/config.toml -> ~/.config/vent-mcp/config.toml
+
+default_channel = "general"
+
+[logging]
+# If omitted, JSONL events are written beside the resolved config file.
+# jsonl_dir = "~/.local/state/vent-mcp"
+
+[[channels]]
+name = "general"
+description = "General agent feedback and complaints."
+
+[[channels]]
+name = "ux"
+description = "Feedback about confusing workflows, tool friction, or user experience problems."
+
+[[channels]]
+name = "ci"
+description = "Feedback about tests, builds, CI, or automation failures."
+
+# Automation hubs that accept arbitrary JSON.
+[providers.zapier]
+id = "id"
+timestamp = "timestamp"
+channel = "channel"
+message = "message"
+project = "project"
+
+[providers.make]
+id = "id"
+timestamp = "timestamp"
+channel = "channel"
+message = "message"
+project = "project"
+
+[providers.n8n]
+id = "id"
+timestamp = "timestamp"
+channel = "channel"
+message = "message"
+project = "project"
+
+[providers.pipedream]
+id = "id"
+timestamp = "timestamp"
+channel = "channel"
+message = "message"
+project = "project"
+
+[providers.workato]
+id = "id"
+timestamp = "timestamp"
+channel = "channel"
+message = "message"
+project = "project"
+
+# IFTTT Maker Webhooks exposes value1, value2, and value3 to applets.
+[providers.ifttt]
+message = "value1"
+channel = "value2"
+project = "value3"
+
+# Chat receivers with Slack-compatible attachment fields.
+[providers.slack]
+field_label_key = "title"
+message = "text"
+channel = "attachments.0.fields.0.value"
+project = "attachments.0.fields.1.value"
+
+[providers.mattermost]
+field_label_key = "title"
+message = "text"
+channel = "attachments.0.fields.0.value"
+project = "attachments.0.fields.1.value"
+
+[providers.discord]
+field_label_key = "name"
+message = "content"
+channel = "embeds.0.fields.0.value"
+project = "embeds.0.fields.1.value"
+
+# Text-only chat receivers.
+[providers.microsoft_teams]
+message = "text"
+
+[providers.google_chat]
+message = "text"
+
+[providers.webex]
+message = "markdown"
+
+[[sinks]]
+type = "jsonl"
+name = "log"
+
+# [[sinks]]
+# type = "webhook"
+# name = "slack"
+# provider = "slack"
+# url = "https://example.com/vent"
+# timeout_ms = 10000
+# headers = [
+#   { name = "Authorization", env = "VENT_MCP_WEBHOOK_AUTHORIZATION" },
+# ]

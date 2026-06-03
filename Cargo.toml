@@ -1,0 +1,52 @@
+[package]
+name = "vent-mcp"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+description = "STDIO MCP server that lets agents vent to configured channels"
+readme = "README.md"
+license = "MIT"
+repository = "https://github.com/bnomei/vent-mcp"
+homepage = "https://github.com/bnomei/vent-mcp"
+documentation = "https://docs.rs/vent-mcp"
+keywords = ["mcp", "agent", "feedback", "webhook", "cli"]
+categories = [
+    "command-line-utilities",
+    "development-tools",
+    "development-tools::debugging",
+]
+exclude = ["/audit/"]
+default-run = "vent"
+
+[features]
+default = ["cli", "webhook"]
+cli = ["dep:clap"]
+webhook = ["dep:reqwest", "dep:url"]
+
+[lib]
+name = "vent_mcp"
+path = "src/lib.rs"
+
+[[bin]]
+name = "vent"
+path = "src/main.rs"
+
+[dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+clap = { version = "4.5", default-features = false, features = ["derive", "error-context", "help", "std", "usage"], optional = true }
+futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"], optional = true }
+rmcp = { version = "1.7", default-features = false, features = ["server", "transport-io", "macros"] }
+schemars = "1.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["fs", "io-util", "macros", "rt-multi-thread", "signal", "sync"] }
+toml = "0.9"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "fmt", "registry", "std"] }
+url = { version = "2", optional = true }
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = "3"
