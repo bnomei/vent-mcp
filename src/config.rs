@@ -235,11 +235,11 @@ impl Default for AppConfig {
     /// to record vents without requiring webhook credentials or provider setup.
     fn default() -> Self {
         Self {
-            default_channel: "general".to_string(),
+            default_channel: "feedback".to_string(),
             logging: LoggingConfig::default(),
             channels: vec![ChannelConfig {
-                name: "general".to_string(),
-                description: "General agent feedback and complaints.".to_string(),
+                name: "feedback".to_string(),
+                description: "Blocked work, repeated failures, or confusing workflows. Avoid routine progress updates.".to_string(),
                 sinks: vec![DEFAULT_LOG_SINK_NAME.to_string()],
             }],
             providers: default_webhook_providers(),
@@ -1280,7 +1280,7 @@ name = "log"
         .expect("default config should be created");
 
         assert!(path.exists());
-        assert_eq!(loaded.config().default_channel(), "general");
+        assert_eq!(loaded.config().default_channel(), "feedback");
     }
 
     /// Verifies the default config ships the broad webhook provider set.

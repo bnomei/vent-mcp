@@ -1,26 +1,33 @@
 # vent-mcp sample config.
 # Path precedence: VENT_MCP_CONFIG -> $XDG_CONFIG_HOME/vent-mcp/config.toml -> ~/.config/vent-mcp/config.toml
 
-default_channel = "general"
+default_channel = "feedback"
 
 [logging]
 # If omitted, JSONL events are written beside the resolved config file.
 # jsonl_dir = "~/.local/state/vent-mcp"
 
 [[channels]]
-name = "general"
-description = "General agent feedback and complaints."
+name = "feedback"
+description = "Blocked work, repeated failures, or confusing workflows. Avoid routine progress updates."
 sinks = ["log"]
 
-[[channels]]
-name = "ux"
-description = "Feedback about confusing workflows, tool friction, or user experience problems."
-sinks = ["log"]
-
-[[channels]]
-name = "ci"
-description = "Feedback about tests, builds, CI, or automation failures."
-sinks = ["log"]
+# Uncomment optional channels when you want sharper routing.
+#
+# [[channels]]
+# name = "automation"
+# description = "Build, test, CI/CD, deployment, scheduler, or pipeline failures that blocked progress."
+# sinks = ["log"]
+#
+# [[channels]]
+# name = "capability"
+# description = "Missing permission, integration, API, runtime capability, or unsupported platform behavior blocking a clear task."
+# sinks = ["log"]
+#
+# [[channels]]
+# name = "incident"
+# description = "Suspected outage, degraded dependency, auth failure, or error spike needing operational attention."
+# sinks = ["log"]
 
 # Automation hubs that accept arbitrary JSON.
 [providers.zapier]
@@ -96,10 +103,11 @@ name = "log"
 
 # [[sinks]]
 # type = "webhook"
-# name = "discord-ci"
+# name = "discord-automation"
 # provider = "discord"
 # url = "https://discord.com/api/webhooks/..."
 # timeout_ms = 10000
 #
-# To route CI vents to this sink, add it to that channel:
-# sinks = ["log", "discord-ci"]
+# To route automation vents to this sink, uncomment the automation channel and
+# add this sink:
+# sinks = ["log", "discord-automation"]

@@ -88,25 +88,33 @@ The same binary can also be used directly from the shell when built with the
 ```bash
 vent list
 vent "The queue changed mid-run."
-vent --channel ci "The failing check output was hard to correlate."
 vent --mcp
+```
+
+After enabling an optional channel:
+
+```bash
+vent --channel automation "The failing check output was hard to correlate."
 ```
 
 ## Tools
 
 - `list_channels`: lists configured channel names and descriptions.
-- `vent`: sends a message to a channel and returns an ACK-only delivery result.
+- `vent`: sends actionable feedback to a channel and returns an ACK-only
+  delivery result.
 
-`vent` accepts:
+`vent` accepts a message and, optionally, a configured channel:
 
 ```json
 {
   "message": "The failing check output was hard to correlate with the changed file.",
-  "channel": "ci"
+  "channel": "automation"
 }
 ```
 
-If `channel` is omitted, the configured `default_channel` is used.
+If `channel` is omitted, the configured `default_channel` is used. Agents should
+avoid repeated vents for the same issue unless new root-cause evidence appears;
+the event id is a trace id, not a deduplication key.
 
 ## Configuration
 
@@ -132,14 +140,14 @@ See [configs/config.sample.toml](configs/config.sample.toml).
 - A **provider** is a webhook payload shape. For example,
   `provider = "discord"` formats the event for a Discord incoming webhook.
 
-Sink names and channel names do not have to match. A channel named `ci` can
-target a sink named `discord-ci`, `log`, or both:
+Sink names and channel names do not have to match. A channel named `automation`
+can target a sink named `discord-automation`, `log`, or both:
 
 ```toml
 [[channels]]
-name = "ci"
-description = "Feedback about tests, builds, CI, or automation failures."
-sinks = ["log", "discord-ci"]
+name = "automation"
+description = "Build, test, CI/CD, deployment, scheduler, or pipeline failures that blocked progress."
+sinks = ["log", "discord-automation"]
 ```
 
 The default `log` sink writes JSONL events to `vents.jsonl` beside the config
@@ -154,7 +162,7 @@ sent unchanged:
 {
   "id": "aZ8pQ2xK",
   "timestamp": "2026-06-03T12:34:56Z",
-  "channel": "ci",
+  "channel": "automation",
   "message": "The failing check output was hard to correlate with the changed file.",
   "project": "my-repo"
 }
@@ -167,28 +175,28 @@ Header values are read from environment variables. Webhook requests default to a
 10 second timeout; set `timeout_ms` to override that per sink. Discord incoming
 webhook URLs normally do not need extra headers.
 
-### Route CI Vents To Discord
+### Route Automation Vents To Discord
 
 Start from the generated config or [configs/config.sample.toml](configs/config.sample.toml).
-Keep the `log` sink, add one Discord sink, then route the `ci` channel to both:
+Keep the `log` sink, uncomment or add the `automation` channel, then add one
+Discord sink:
 
-```diff
- [[channels]]
- name = "ci"
- description = "Feedback about tests, builds, CI, or automation failures."
--sinks = ["log"]
-+sinks = ["log", "discord-ci"]
+```toml
+[[channels]]
+name = "automation"
+description = "Build, test, CI/CD, deployment, scheduler, or pipeline failures that blocked progress."
+sinks = ["log", "discord-automation"]
 
- [[sinks]]
- type = "jsonl"
- name = "log"
- 
-+[[sinks]]
-+type = "webhook"
-+name = "discord-ci"
-+provider = "discord"
-+url = "https://discord.com/api/webhooks/..."
-+timeout_ms = 10000
+[[sinks]]
+type = "jsonl"
+name = "log"
+
+[[sinks]]
+type = "webhook"
+name = "discord-automation"
+provider = "discord"
+url = "https://discord.com/api/webhooks/..."
+timeout_ms = 10000
 ```
 
 The built-in `discord` provider maps `message` to Discord `content` and adds
@@ -196,8 +204,9 @@ The built-in `discord` provider maps `message` to Discord `content` and adds
 because the channel is routing metadata. You do not need to add a
 `[providers.discord]` block unless you want to customize the payload.
 
-With the config above, `channel = "ci"` vents are written to `vents.jsonl` and
-posted to Discord. Other channels go only to the sinks they list.
+With the config above, `channel = "automation"` vents are written to
+`vents.jsonl` and posted to Discord. Other channels go only to the sinks they
+list.
 
 The `default_channel` value must match one declared `[[channels]]` entry.
 
@@ -216,7 +225,7 @@ project = "embeds.0.fields.0.value"
 
 [[sinks]]
 type = "webhook"
-name = "discord-ci"
+name = "discord-automation"
 provider = "discord"
 url = "https://discord.com/api/webhooks/..."
 timeout_ms = 10000

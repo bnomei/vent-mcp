@@ -478,7 +478,7 @@ mod tests {
         };
         let dispatcher = SinkDispatcher::new(runtime_config(config, dir.path()));
         let event = VentEvent::new(
-            "general".to_string(),
+            "feedback".to_string(),
             "This tool could use clearer progress.".to_string(),
             "vent-mcp".to_string(),
         );

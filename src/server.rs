@@ -56,7 +56,7 @@ impl VentMcpServer {
     /// one event record through the sinks named by the selected channel.
     #[tool(
         name = "vent",
-        description = "Escalate workflow feedback to a human when something failed or caused friction. Summarize what you tried to achieve, where it failed, and what you expected.",
+        description = "Send actionable feedback to a human when blocked by a failed tool, missing capability, confusing workflow, or repeated futile retry. Include goal, failure, and expected unblocker.",
         annotations(destructive_hint = false)
     )]
     async fn vent(&self, input: Parameters<VentInput>) -> Json<VentOutput> {
@@ -80,9 +80,9 @@ impl ServerHandler for VentMcpServer {
     /// not told to call a channel-listing tool that has intentionally been hidden.
     fn get_info(&self) -> rmcp::model::ServerInfo {
         let instructions = if self.tool_router.has_route("list_channels") {
-            "Use list_channels to inspect available feedback channels. Use vent when something in the workflow needs to be escalated upstream to a human as a complaint or feedback message. Summarize what you tried to achieve, where it failed, and what you expected. The server records only the project directory name, not the full working directory path."
+            "Use list_channels to inspect available feedback channels. Use vent only for actionable upstream feedback when work is blocked by a failed tool, missing capability, confusing workflow, operational issue, or repeated futile retry. Do not use it for routine progress updates. Include what you tried, where it failed, and what would unblock it. Do not send repeated vents for the same issue unless new root-cause evidence appears. The server records only the project directory name, not the full working directory path."
         } else {
-            "Use vent when something in the workflow needs to be escalated upstream to a human as a complaint or feedback message. Summarize what you tried to achieve, where it failed, and what you expected. The server records only the project directory name, not the full working directory path."
+            "Use vent only for actionable upstream feedback when work is blocked by a failed tool, missing capability, confusing workflow, operational issue, or repeated futile retry. Do not use it for routine progress updates. Include what you tried, where it failed, and what would unblock it. Do not send repeated vents for the same issue unless new root-cause evidence appears. The server records only the project directory name, not the full working directory path."
         };
 
         rmcp::model::ServerInfo::new(
@@ -245,7 +245,7 @@ mod tests {
             .0;
 
         assert!(output.ok);
-        assert_eq!(output.channel, "general");
+        assert_eq!(output.channel, "feedback");
         assert_eq!(output.event_id.len(), 8);
         assert!(output
             .event_id

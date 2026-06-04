@@ -62,19 +62,19 @@ fn write_cli_config(jsonl_dir: &Path) -> NamedTempFile {
     let mut file = NamedTempFile::new().expect("temp config");
     writeln!(
         file,
-        r#"default_channel = "general"
+        r#"default_channel = "feedback"
 
 [logging]
 jsonl_dir = "{}"
 
 [[channels]]
-name = "general"
-description = "General feedback."
+name = "feedback"
+description = "Actionable feedback."
 sinks = ["log"]
 
 [[channels]]
-name = "ux"
-description = "Workflow friction."
+name = "automation"
+description = "Automation failures."
 sinks = ["log"]
 
 [[sinks]]
@@ -166,8 +166,8 @@ fn cli_lists_channels() {
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("general (default) - General feedback."));
-    assert!(stdout.contains("ux - Workflow friction."));
+    assert!(stdout.contains("feedback (default) - Actionable feedback."));
+    assert!(stdout.contains("automation - Automation failures."));
 }
 
 /// Verifies CLI message input vents to the default channel and writes JSONL.
@@ -186,13 +186,13 @@ fn cli_vents_to_default_channel() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("vented "));
-    assert!(stdout.contains(" to general"));
+    assert!(stdout.contains(" to feedback"));
 
     let raw = std::fs::read_to_string(dir.path().join("vents.jsonl")).expect("jsonl file");
     let event: serde_json::Value =
         serde_json::from_str(raw.lines().next().expect("jsonl line")).expect("event json");
     assert_eq!(event["id"].as_str().expect("id").len(), 8);
-    assert_eq!(event["channel"], "general");
+    assert_eq!(event["channel"], "feedback");
     assert_eq!(event["message"], "The queue changed mid-run.");
 }
 
@@ -206,7 +206,7 @@ fn cli_vents_to_named_channel() {
     let output = command()
         .env("VENT_MCP_CONFIG", config.path())
         .arg("--channel")
-        .arg("ux")
+        .arg("automation")
         .arg("The workflow hid the useful error.")
         .output()
         .expect("run binary");
@@ -217,7 +217,7 @@ fn cli_vents_to_named_channel() {
     let event: serde_json::Value =
         serde_json::from_str(raw.lines().next().expect("jsonl line")).expect("event json");
     assert_eq!(event["id"].as_str().expect("id").len(), 8);
-    assert_eq!(event["channel"], "ux");
+    assert_eq!(event["channel"], "automation");
     assert_eq!(event["message"], "The workflow hid the useful error.");
 }
 
