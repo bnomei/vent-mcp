@@ -15,8 +15,8 @@ working. The crate is named `vent-mcp`; the installed binary is named `vent`.
 The Rust library surface is internal support for that shipped binary, not a
 stable embedding API.
 
-The idea pairs well with Benjamin Verbeek's Lovable talk,
-[The agent that files its own bug reports](https://www.youtube.com/watch?v=KA5kPbdkK2E):
+The idea pairs well with Benjamin Verbeek's talk,
+[The agent that files its own bug reports](https://www.youtube.com/watch?v=KA5kPbdkK2E) and the [official Lovable blog post](https://lovable.dev/blog/we-gave-our-agent-a-vent-tool):
 give the agent a low-friction route to report confusion, missing affordances,
 and repeated workflow failures while the context is still fresh.
 
