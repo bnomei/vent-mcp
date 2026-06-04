@@ -42,6 +42,7 @@ pub struct VentDefaultChannelInput {
 #[serde(rename_all = "camelCase")]
 pub struct VentOutput {
     pub ok: bool,
+    /// Short trace id for the accepted event, not a deduplication key.
     pub event_id: String,
     pub channel: String,
     #[serde(skip_serializing_if = "Option::is_none")]
