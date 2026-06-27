@@ -353,7 +353,17 @@ impl AppConfig {
             }
         }
 
+        // All jsonl sinks append to the same shared log file, so routing one
+        // event to more than one of them would persist duplicate records.
+        let jsonl_sink_names: BTreeSet<&str> = self
+            .sinks
+            .iter()
+            .filter(|sink| matches!(sink, SinkConfig::Jsonl(_)))
+            .map(SinkConfig::name)
+            .collect();
+
         for channel in &self.channels {
+            let mut jsonl_in_channel = 0;
             for sink in &channel.sinks {
                 if !sink_names.contains(sink.as_str()) {
                     return Err(ConfigValidationError::UnknownChannelSink {
@@ -361,6 +371,14 @@ impl AppConfig {
                         sink: sink.clone(),
                     });
                 }
+                if jsonl_sink_names.contains(sink.as_str()) {
+                    jsonl_in_channel += 1;
+                }
+            }
+            if jsonl_in_channel > 1 {
+                return Err(ConfigValidationError::MultipleJsonlSinksInChannel {
+                    channel: channel.name.clone(),
+                });
             }
         }
 
@@ -646,6 +664,10 @@ pub enum ConfigValidationError {
     CollidingWebhookProviderPath { provider: String, path: String },
     #[error("cannot expand home-relative jsonl_dir because HOME is not set: {path}")]
     JsonlDirHomeNotSet { path: String },
+    #[error(
+        "channel {channel} references multiple jsonl sinks, which would write duplicate records to the shared log file"
+    )]
+    MultipleJsonlSinksInChannel { channel: String },
 }
 
 /// Resolves the active configuration path from process environment.
@@ -1336,6 +1358,33 @@ name = "log"
         assert!(matches!(
             error.into_validation(),
             Some(ConfigValidationError::InvalidWebhookProviderPath { .. })
+        ));
+    }
+
+    /// Verifies a channel cannot route to more than one jsonl sink, which would
+    /// persist duplicate records to the shared log file.
+    #[test]
+    fn channel_with_multiple_jsonl_sinks_is_rejected() {
+        let config = r#"
+default_channel = "feedback"
+
+[[channels]]
+name = "feedback"
+description = "Feedback."
+sinks = ["log", "audit"]
+
+[[sinks]]
+type = "jsonl"
+name = "log"
+
+[[sinks]]
+type = "jsonl"
+name = "audit"
+"#;
+        let error = AppConfig::from_toml_str(config).expect_err("duplicate jsonl sinks should fail");
+        assert!(matches!(
+            error.into_validation(),
+            Some(ConfigValidationError::MultipleJsonlSinksInChannel { .. })
         ));
     }
 

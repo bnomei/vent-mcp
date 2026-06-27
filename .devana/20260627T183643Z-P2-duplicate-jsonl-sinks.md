@@ -1,5 +1,5 @@
 DEVANA-FINDING: v1
-DEVANA-STATE: open | P2 | medium | security=no
+DEVANA-STATE: fixed | P2 | medium | security=no
 DEVANA-KEY: src/sinks.rs:142 | duplicate-jsonl-sinks
 
 # Multiple JSONL sinks on one channel write duplicate identical records
@@ -58,6 +58,7 @@ After working this report, preserve the original finding body. Update line 2 `DE
 ## Status Notes
 
 - 2026-06-27: open by Devana. Initial report written from static source inspection.
+- 2026-06-27: fixed. Confirmed: `write_jsonl` always opens the constant `JSONL_FILE_NAME` ("vents.jsonl") path regardless of sink name, so a channel listing two jsonl sinks fans out via `dispatch`/`join_all` and appends two identical lines for one event. Fix (report option 1, preserving the documented single shared log file): `AppConfig::validate` now rejects any channel referencing more than one jsonl sink with new `ConfigValidationError::MultipleJsonlSinksInChannel`. Added a regression test for the `["log","audit"]` counterexample. Full `cargo test` green. Note: related to P3 duplicate-jsonl-sink-file (sink-definition-level); handled separately.
 
 DEVANA-KEY: src/sinks.rs:142 | duplicate-jsonl-sinks
-DEVANA-SUMMARY: open | P2 | medium | Two JSONL sinks on one channel append duplicate identical lines to the same `vents.jsonl` file.
+DEVANA-SUMMARY: fixed | P2 | medium | Two JSONL sinks on one channel append duplicate identical lines to the same `vents.jsonl` file.
