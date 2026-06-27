@@ -1,5 +1,5 @@
 DEVANA-FINDING: v1
-DEVANA-STATE: open | P3 | medium | security=no
+DEVANA-STATE: duplicate | P3 | medium | security=no
 DEVANA-KEY: src/sinks.rs:142 | duplicate-jsonl-sink-file
 
 # Multiple JSONL sinks share one fixed file, so a channel routing to two of them double-writes each event
@@ -106,6 +106,7 @@ stable unless the same finding moved.
 ## Status Notes
 
 - 2026-06-27: open by Devana. Initial report written from static source inspection.
+- 2026-06-27: duplicate of P2 duplicate-jsonl-sinks (20260627T183643Z, same DEVANA-KEY base src/sinks.rs:142, identical log+audit counterexample). The actionable data-duplication bug — one channel routing one event to two jsonl sinks producing two identical lines — is now fixed there via `ConfigValidationError::MultipleJsonlSinksInChannel` in `AppConfig::validate`. The broader suggestion (give each jsonl sink a distinct file so distinct sink names = distinct destinations) is intentionally NOT adopted: the single shared `vents.jsonl` is the intended model, as evidenced by the maintainer test `dispatch_uses_selected_channel_sinks`, which defines two jsonl sinks (`log`, `audit`) across two separate channels writing to the same file and asserts success (passes validation via `from_app_config`). Cross-channel jsonl sinks do not duplicate any single event, so no further change is warranted.
 
 DEVANA-KEY: src/sinks.rs:142 | duplicate-jsonl-sink-file
-DEVANA-SUMMARY: open | P3 | medium | Every JSONL sink resolves to the same fixed vents.jsonl, so a channel routing to two distinct JSONL sinks double-writes each event with the same id while reporting both as successful distinct deliveries.
+DEVANA-SUMMARY: duplicate | P3 | medium | Duplicate of P2 duplicate-jsonl-sinks; the per-channel double-write is fixed via MultipleJsonlSinksInChannel, and the shared single vents.jsonl is the intended model (cross-channel jsonl sinks do not duplicate events).
