@@ -642,6 +642,8 @@ pub enum ConfigValidationError {
     },
     #[error("duplicate webhook provider output path in {provider}: {path}")]
     DuplicateWebhookProviderPath { provider: String, path: String },
+    #[error("webhook provider output path in {provider} collides with another mapped path: {path}")]
+    CollidingWebhookProviderPath { provider: String, path: String },
 }
 
 /// Resolves the active configuration path from process environment.
@@ -1264,6 +1266,32 @@ name = "log"
         assert!(matches!(
             error.into_validation(),
             Some(ConfigValidationError::InvalidWebhookProviderPath { .. })
+        ));
+
+        // A parent path and one of its descendants must be rejected at load: the
+        // shorter path's leaf insert would overwrite the nested field's container
+        // and silently drop a mapped field on successful webhook delivery.
+        let colliding_path = r#"
+default_channel = "general"
+
+[[channels]]
+name = "general"
+description = "General feedback."
+sinks = ["log"]
+
+[providers.bad]
+message = "payload.body"
+project = "payload"
+
+[[sinks]]
+type = "jsonl"
+name = "log"
+"#;
+        let error =
+            AppConfig::from_toml_str(colliding_path).expect_err("colliding path should fail");
+        assert!(matches!(
+            error.into_validation(),
+            Some(ConfigValidationError::CollidingWebhookProviderPath { .. })
         ));
     }
 

@@ -41,7 +41,7 @@ impl ProviderTemplate {
                 },
             )?;
 
-        let mut target_paths = std::collections::BTreeSet::new();
+        let mut target_paths: Vec<String> = Vec::with_capacity(provider.fields.len());
         let mut fields = Vec::with_capacity(provider.fields.len());
         for (field, path) in &provider.fields {
             if !is_event_field(field) {
@@ -58,12 +58,27 @@ impl ProviderTemplate {
                     path: path.clone(),
                 }
             })?;
-            if !target_paths.insert(output_path.canonical()) {
-                return Err(ConfigValidationError::DuplicateWebhookProviderPath {
-                    provider: provider_name.to_string(),
-                    path: path.clone(),
-                });
+            let canonical = output_path.canonical();
+            for existing in &target_paths {
+                if existing == &canonical {
+                    return Err(ConfigValidationError::DuplicateWebhookProviderPath {
+                        provider: provider_name.to_string(),
+                        path: path.clone(),
+                    });
+                }
+                // A parent path and one of its descendants cannot coexist: the
+                // leaf insert for the parent overwrites the descendant's
+                // container (or vice versa), silently dropping a mapped field.
+                if is_path_ancestor(existing, &canonical)
+                    || is_path_ancestor(&canonical, existing)
+                {
+                    return Err(ConfigValidationError::CollidingWebhookProviderPath {
+                        provider: provider_name.to_string(),
+                        path: path.clone(),
+                    });
+                }
             }
+            target_paths.push(canonical);
 
             fields.push(ProviderFieldMapping {
                 field: field.clone(),
@@ -195,6 +210,18 @@ fn parse_path_key(segment: &str) -> Result<String, ()> {
     } else {
         Err(())
     }
+}
+
+/// Reports whether `ancestor` is a strict path prefix of `descendant`, i.e. the
+/// segments of `ancestor` are a leading subsequence of `descendant`'s segments.
+///
+/// Compares on the dotted canonical form: the trailing `.` requirement keeps
+/// sibling segments that merely share a textual prefix (`a.1` vs `a.10`) from
+/// being treated as a parent/child pair.
+fn is_path_ancestor(ancestor: &str, descendant: &str) -> bool {
+    descendant.len() > ancestor.len()
+        && descendant.starts_with(ancestor)
+        && descendant.as_bytes()[ancestor.len()] == b'.'
 }
 
 fn is_event_field(field: &str) -> bool {
