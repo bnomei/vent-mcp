@@ -333,10 +333,15 @@ fn sanitize_webhook_error_body(body: &str, secret_values: &[String]) -> String {
     const MAX_PREVIEW_CHARS: usize = 512;
 
     let mut sanitized = body.to_string();
-    for secret in secret_values {
-        if secret.len() >= 4 {
-            sanitized = sanitized.replace(secret, "[redacted]");
-        }
+    // Redact every collected credential regardless of length: short URL query
+    // tokens and env-backed header values are still secrets. The empty check is
+    // required because `String::replace` with an empty needle corrupts output,
+    // and longest-first ordering prevents a short secret that is a substring of a
+    // longer one from leaving fragments behind.
+    let mut secrets: Vec<&String> = secret_values.iter().filter(|s| !s.is_empty()).collect();
+    secrets.sort_by_key(|secret| std::cmp::Reverse(secret.len()));
+    for secret in secrets {
+        sanitized = sanitized.replace(secret.as_str(), "[redacted]");
     }
 
     let normalized = sanitized.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -667,5 +672,21 @@ mod tests {
         assert!(message.contains("[redacted]"));
         assert!(!message.contains("secret-token-value"));
         assert!(message.len() < 600);
+    }
+
+    /// Verifies short URL/header secrets (length < 4) are still redacted.
+    #[test]
+    #[cfg(feature = "webhook")]
+    fn webhook_status_errors_redact_short_secrets() {
+        let secrets = vec!["abc".to_string(), "xy".to_string(), String::new()];
+        let message = super::webhook_status_error(
+            reqwest::StatusCode::UNAUTHORIZED,
+            Some("invalid token abc for header xy"),
+            &secrets,
+        );
+
+        assert!(!message.contains("abc"));
+        assert!(!message.contains("xy"));
+        assert!(message.contains("[redacted]"));
     }
 }

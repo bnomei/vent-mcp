@@ -1,5 +1,5 @@
 DEVANA-FINDING: v1
-DEVANA-STATE: open | P2 | medium | security=yes
+DEVANA-STATE: fixed | P2 | medium | security=yes
 DEVANA-KEY: src/sinks.rs:337 | webhook-short-secret-leak
 
 # Webhook error previews skip redaction for secrets shorter than four characters
@@ -43,6 +43,7 @@ After working this report, preserve the original finding body. Update line 2 `DE
 ## Status Notes
 
 - 2026-06-27: open by Devana. Initial report written from static source inspection.
+- 2026-06-27: fixed. Confirmed: `sanitize_webhook_error_body` only redacted secrets with `len() >= 4`, so a len-3 query token (`abc`) or len-2 header value (`xy`) in an echoed non-2xx body reached `VentOutput.error`. Fix (report option 1): redact every collected credential regardless of length, guarding only against empty strings (an empty query value like `?token=` would corrupt output via `String::replace` with an empty needle — this is also what the old `>= 4` guard incidentally prevented). Also sort secrets longest-first so a short secret that is a substring of a longer one doesn't leave fragments. Added a regression test for short + empty secrets. Full `cargo test` green (webhook is a default feature).
 
 DEVANA-KEY: src/sinks.rs:337 | webhook-short-secret-leak
-DEVANA-SUMMARY: open | P2 | medium | Short webhook URL/query/header secrets can leak through MCP-visible delivery error messages.
+DEVANA-SUMMARY: fixed | P2 | medium | Short webhook URL/query/header secrets can leak through MCP-visible delivery error messages.
