@@ -1293,6 +1293,31 @@ name = "log"
             error.into_validation(),
             Some(ConfigValidationError::CollidingWebhookProviderPath { .. })
         ));
+
+        // Unbounded array indices must be rejected at load: at render time they
+        // would `Vec::resize` to the index (OOM) or overflow `index + 1` at
+        // `usize::MAX` and panic the process.
+        let oversized_index = r#"
+default_channel = "general"
+
+[[channels]]
+name = "general"
+description = "General feedback."
+sinks = ["log"]
+
+[providers.bad]
+message = "items.5000000"
+
+[[sinks]]
+type = "jsonl"
+name = "log"
+"#;
+        let error =
+            AppConfig::from_toml_str(oversized_index).expect_err("oversized index should fail");
+        assert!(matches!(
+            error.into_validation(),
+            Some(ConfigValidationError::InvalidWebhookProviderPath { .. })
+        ));
     }
 
     /// Verifies implicit default config paths are created on first load.

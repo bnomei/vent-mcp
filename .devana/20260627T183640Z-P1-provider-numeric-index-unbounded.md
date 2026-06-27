@@ -1,5 +1,5 @@
 DEVANA-FINDING: v1
-DEVANA-STATE: open | P1 | high | security=no
+DEVANA-STATE: fixed | P1 | high | security=no
 DEVANA-KEY: src/provider.rs:246 | provider-numeric-index-unbounded
 
 # Provider numeric path indices are unbounded and can abort the MCP process
@@ -59,6 +59,7 @@ After working this report, preserve the original finding body. Update line 2 `DE
 ## Status Notes
 
 - 2026-06-27: open by Devana. Initial report written from static source inspection.
+- 2026-06-27: fixed. Confirmed: `OutputPath::parse` accepted any `usize` index and `insert_path_segments` did `array.resize(index + 1, ..)` unbounded, so `items.5000000` OOMs and `embeds.18446744073709551615.content` overflows `index + 1` (wraps to 0 in release) then panics on the out-of-bounds `array[usize::MAX]`. Fix: cap indices at compile time with `MAX_PROVIDER_ARRAY_INDEX = 64` in `OutputPath::parse` (oversized → `InvalidWebhookProviderPath` at load), plus a defense-in-depth bound check in `insert_path_segments` returning a structured error instead of resizing/overflowing. Added a load-time regression test for `items.5000000`. Full `cargo test` green.
 
 DEVANA-KEY: src/provider.rs:246 | provider-numeric-index-unbounded
-DEVANA-SUMMARY: open | P1 | high | Unbounded provider array indices can OOM or panic the vent MCP process on a normal vent call.
+DEVANA-SUMMARY: fixed | P1 | high | Unbounded provider array indices can OOM or panic the vent MCP process on a normal vent call.

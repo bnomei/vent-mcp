@@ -12,6 +12,14 @@ use crate::config::{RuntimeConfig, WebhookSinkConfig};
 #[cfg(feature = "webhook")]
 use crate::types::VentEvent;
 
+/// Upper bound for numeric array indices in provider output paths.
+///
+/// Indices are materialized at render time via `Vec::resize(index + 1, ..)`, so
+/// an unbounded index would let a loaded config OOM or panic the process. The
+/// cap is generous relative to built-in providers (which only use index `0`)
+/// while keeping the largest possible array small.
+const MAX_PROVIDER_ARRAY_INDEX: usize = 64;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ProviderTemplate {
     field_label_key: Option<String>,
@@ -146,7 +154,7 @@ impl OutputPath {
                 return Err(());
             }
             if let Ok(array_index) = segment.parse::<usize>() {
-                if index == 0 {
+                if index == 0 || array_index > MAX_PROVIDER_ARRAY_INDEX {
                     return Err(());
                 }
                 segments.push(PathSegment::Index(array_index));
@@ -268,6 +276,13 @@ fn insert_path_segments(
 
     match segment {
         PathSegment::Index(index) => {
+            // Defense in depth: compile-time validation already caps indices, so
+            // a value above the bound means a path bypassed `OutputPath::parse`.
+            // Fail with a structured error rather than risk an OOM or the
+            // `index + 1` overflow that `Vec::resize` would hit at `usize::MAX`.
+            if *index > MAX_PROVIDER_ARRAY_INDEX {
+                return Err("webhook provider path array index out of bounds".to_string());
+            }
             let array = ensure_array(current)?;
             if array.len() <= *index {
                 array.resize(*index + 1, Value::Null);
