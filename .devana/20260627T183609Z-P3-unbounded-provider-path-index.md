@@ -1,5 +1,5 @@
 DEVANA-FINDING: v1
-DEVANA-STATE: open | P3 | medium | security=no
+DEVANA-STATE: duplicate | P3 | medium | security=no
 DEVANA-KEY: src/provider.rs:133 | unbounded-provider-path-index
 
 # Unbounded numeric provider path segment passes validation, then resizes/panics at webhook render
@@ -113,6 +113,7 @@ stable unless the same finding moved.
 ## Status Notes
 
 - 2026-06-27: open by Devana. Initial report written from static source inspection.
+- 2026-06-27: duplicate of P1 provider-numeric-index-unbounded (20260627T183640Z) — same root cause and same suggested fix (cap indices at 64). Already fixed: `OutputPath::parse` now rejects `array_index > MAX_PROVIDER_ARRAY_INDEX` (64) with `InvalidWebhookProviderPath` at config load, and `insert_path_segments` has a defense-in-depth bound check. Both counterexamples (`embeds.50000000.value` and the `usize::MAX` variant) are rejected at startup rather than crashing at render. No further change needed.
 
 DEVANA-KEY: src/provider.rs:133 | unbounded-provider-path-index
-DEVANA-SUMMARY: open | P3 | medium | A validation-accepted oversized numeric provider path segment OOMs or panics the dispatch on the first webhook vent instead of being rejected at config load.
+DEVANA-SUMMARY: duplicate | P3 | medium | Duplicate of P1 provider-numeric-index-unbounded; oversized numeric provider path indices are now capped at 64 and rejected at config load via InvalidWebhookProviderPath.
