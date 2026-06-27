@@ -715,6 +715,11 @@ fn resolve_jsonl_dir(logging: &LoggingConfig, config_dir: &Path) -> PathBuf {
     logging
         .jsonl_dir
         .as_deref()
+        .map(str::trim)
+        // An empty or whitespace-only value behaves like omission rather than
+        // resolving to the empty (CWD-relative) path; mirrors how empty env
+        // values are ignored via `non_empty_os_string`.
+        .filter(|value| !value.is_empty())
         .map(expand_tilde)
         .unwrap_or_else(|| config_dir.to_path_buf())
 }
@@ -1318,6 +1323,30 @@ name = "log"
             error.into_validation(),
             Some(ConfigValidationError::InvalidWebhookProviderPath { .. })
         ));
+    }
+
+    /// Verifies empty/whitespace `jsonl_dir` falls back to the config directory
+    /// instead of resolving to the CWD-relative empty path.
+    #[test]
+    fn empty_jsonl_dir_falls_back_to_config_dir() {
+        let config_dir = PathBuf::from("/home/user/.config/vent-mcp");
+
+        for value in [None, Some(String::new()), Some("   ".to_string())] {
+            let logging = super::LoggingConfig { jsonl_dir: value };
+            assert_eq!(
+                super::resolve_jsonl_dir(&logging, &config_dir),
+                config_dir,
+                "empty/omitted jsonl_dir should anchor to the config directory"
+            );
+        }
+
+        let explicit = super::LoggingConfig {
+            jsonl_dir: Some("/var/log/vent".to_string()),
+        };
+        assert_eq!(
+            super::resolve_jsonl_dir(&explicit, &config_dir),
+            PathBuf::from("/var/log/vent")
+        );
     }
 
     /// Verifies implicit default config paths are created on first load.

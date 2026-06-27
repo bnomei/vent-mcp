@@ -1,5 +1,5 @@
 DEVANA-FINDING: v1
-DEVANA-STATE: open | P2 | medium | security=no
+DEVANA-STATE: fixed | P2 | medium | security=no
 DEVANA-KEY: src/config.rs:712 | jsonl-dir-empty-string-cwd
 
 # Empty `jsonl_dir` writes vents to the process working directory
@@ -48,6 +48,7 @@ After working this report, preserve the original finding body. Update line 2 `DE
 ## Status Notes
 
 - 2026-06-27: open by Devana. Initial report written from static source inspection.
+- 2026-06-27: fixed. Confirmed: `resolve_jsonl_dir` only used `config_dir` in the `None` branch, so `jsonl_dir = ""` became `Some("")` → `expand_tilde("")` → empty `PathBuf` → CWD-relative `vents.jsonl`. Fix: trim the value and treat empty/whitespace-only like omission (`.map(str::trim).filter(|v| !v.is_empty())`), mirroring `non_empty_os_string`. Added a unit test covering omitted/empty/whitespace plus an explicit path. Full `cargo test` green.
 
 DEVANA-KEY: src/config.rs:712 | jsonl-dir-empty-string-cwd
-DEVANA-SUMMARY: open | P2 | medium | Empty `jsonl_dir` resolves to CWD-relative `vents.jsonl` instead of the config directory.
+DEVANA-SUMMARY: fixed | P2 | medium | Empty `jsonl_dir` resolves to CWD-relative `vents.jsonl` instead of the config directory.
