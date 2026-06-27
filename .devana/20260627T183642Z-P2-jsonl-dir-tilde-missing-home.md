@@ -1,5 +1,5 @@
 DEVANA-FINDING: v1
-DEVANA-STATE: open | P2 | medium | security=no
+DEVANA-STATE: fixed | P2 | medium | security=no
 DEVANA-KEY: src/config.rs:725 | jsonl-dir-tilde-missing-home
 
 # Tilde `jsonl_dir` paths fall back to literal `~/…` when `HOME` is unset
@@ -50,6 +50,7 @@ After working this report, preserve the original finding body. Update line 2 `DE
 ## Status Notes
 
 - 2026-06-27: open by Devana. Initial report written from static source inspection.
+- 2026-06-27: fixed. Confirmed: `expand_tilde` returned the literal `~/…` path when `home_dir()` was `None`, so a home-relative `jsonl_dir` landed under the CWD. Fix: `expand_tilde` now fails closed (returns `Err`) when a tilde path can't resolve home, and `resolve_jsonl_dir` is now fallible, surfacing `ConfigValidationError::JsonlDirHomeNotSet` at config load — matching the fail-closed `HomeDirectoryNotSet` behavior of default config path resolution. Refactored expansion into an injectable `expand_tilde_with(value, home)` (mirrors existing `resolve_config_path_with`) so the no-home case is tested without mutating global `HOME`. Full `cargo test` green.
 
 DEVANA-KEY: src/config.rs:725 | jsonl-dir-tilde-missing-home
-DEVANA-SUMMARY: open | P2 | medium | Tilde `jsonl_dir` values write to a literal `~/…` path under CWD when `HOME` is unset.
+DEVANA-SUMMARY: fixed | P2 | medium | Tilde `jsonl_dir` values write to a literal `~/…` path under CWD when `HOME` is unset.

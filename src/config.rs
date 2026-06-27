@@ -133,7 +133,7 @@ impl RuntimeConfig {
             .enumerate()
             .map(|(index, sink)| (sink.name().to_string(), index))
             .collect();
-        let jsonl_dir = resolve_jsonl_dir(&logging, &config_dir);
+        let jsonl_dir = resolve_jsonl_dir(&logging, &config_dir)?;
 
         Ok(Self {
             default_channel,
@@ -644,6 +644,8 @@ pub enum ConfigValidationError {
     DuplicateWebhookProviderPath { provider: String, path: String },
     #[error("webhook provider output path in {provider} collides with another mapped path: {path}")]
     CollidingWebhookProviderPath { provider: String, path: String },
+    #[error("cannot expand home-relative jsonl_dir because HOME is not set: {path}")]
+    JsonlDirHomeNotSet { path: String },
 }
 
 /// Resolves the active configuration path from process environment.
@@ -711,31 +713,43 @@ fn config_dir_for_path(path: &Path) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
-fn resolve_jsonl_dir(logging: &LoggingConfig, config_dir: &Path) -> PathBuf {
-    logging
+fn resolve_jsonl_dir(
+    logging: &LoggingConfig,
+    config_dir: &Path,
+) -> Result<PathBuf, ConfigValidationError> {
+    // An empty or whitespace-only value behaves like omission rather than
+    // resolving to the empty (CWD-relative) path; mirrors how empty env values
+    // are ignored via `non_empty_os_string`.
+    let Some(value) = logging
         .jsonl_dir
         .as_deref()
         .map(str::trim)
-        // An empty or whitespace-only value behaves like omission rather than
-        // resolving to the empty (CWD-relative) path; mirrors how empty env
-        // values are ignored via `non_empty_os_string`.
         .filter(|value| !value.is_empty())
-        .map(expand_tilde)
-        .unwrap_or_else(|| config_dir.to_path_buf())
+    else {
+        return Ok(config_dir.to_path_buf());
+    };
+
+    expand_tilde(value).map_err(|()| ConfigValidationError::JsonlDirHomeNotSet {
+        path: value.to_string(),
+    })
 }
 
-fn expand_tilde(value: &str) -> PathBuf {
+fn expand_tilde(value: &str) -> Result<PathBuf, ()> {
+    expand_tilde_with(value, home_dir())
+}
+
+fn expand_tilde_with(value: &str, home: Option<PathBuf>) -> Result<PathBuf, ()> {
+    // Fail closed when a home-relative path cannot resolve, rather than silently
+    // writing to a literal `~/…` directory under the current working directory.
     if value == "~" {
-        return home_dir().unwrap_or_else(|| PathBuf::from(value));
+        return home.ok_or(());
     }
 
     if let Some(rest) = value.strip_prefix("~/") {
-        if let Some(home) = home_dir() {
-            return home.join(rest);
-        }
+        return home.map(|home| home.join(rest)).ok_or(());
     }
 
-    Path::new(value).to_path_buf()
+    Ok(Path::new(value).to_path_buf())
 }
 
 fn home_dir() -> Option<PathBuf> {
@@ -1334,7 +1348,7 @@ name = "log"
         for value in [None, Some(String::new()), Some("   ".to_string())] {
             let logging = super::LoggingConfig { jsonl_dir: value };
             assert_eq!(
-                super::resolve_jsonl_dir(&logging, &config_dir),
+                super::resolve_jsonl_dir(&logging, &config_dir).expect("should resolve"),
                 config_dir,
                 "empty/omitted jsonl_dir should anchor to the config directory"
             );
@@ -1344,7 +1358,30 @@ name = "log"
             jsonl_dir: Some("/var/log/vent".to_string()),
         };
         assert_eq!(
-            super::resolve_jsonl_dir(&explicit, &config_dir),
+            super::resolve_jsonl_dir(&explicit, &config_dir).expect("should resolve"),
+            PathBuf::from("/var/log/vent")
+        );
+    }
+
+    /// Verifies tilde expansion fails closed when home is unresolved instead of
+    /// returning a literal `~/…` path that would land under the CWD.
+    #[test]
+    fn tilde_expansion_without_home_errors() {
+        let home = Some(PathBuf::from("/home/user"));
+        assert_eq!(
+            super::expand_tilde_with("~/.local/state/vent-mcp", home.clone()).expect("has home"),
+            PathBuf::from("/home/user/.local/state/vent-mcp")
+        );
+        assert_eq!(
+            super::expand_tilde_with("~", home).expect("has home"),
+            PathBuf::from("/home/user")
+        );
+
+        assert!(super::expand_tilde_with("~/.local/state/vent-mcp", None).is_err());
+        assert!(super::expand_tilde_with("~", None).is_err());
+        // Non-tilde paths never depend on home.
+        assert_eq!(
+            super::expand_tilde_with("/var/log/vent", None).expect("absolute"),
             PathBuf::from("/var/log/vent")
         );
     }
