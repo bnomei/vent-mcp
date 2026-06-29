@@ -1369,6 +1369,50 @@ name = "log"
             error.into_validation(),
             Some(ConfigValidationError::InvalidWebhookProviderPath { .. })
         ));
+
+        let overflowing_index = r#"
+default_channel = "general"
+
+[[channels]]
+name = "general"
+description = "General feedback."
+sinks = ["log"]
+
+[providers.bad]
+message = "items.999999999999999999999999999999999999999999"
+
+[[sinks]]
+type = "jsonl"
+name = "log"
+"#;
+        let error =
+            AppConfig::from_toml_str(overflowing_index).expect_err("overflowing index should fail");
+        assert!(matches!(
+            error.into_validation(),
+            Some(ConfigValidationError::InvalidWebhookProviderPath { .. })
+        ));
+
+        let overflowing_root_index = r#"
+default_channel = "general"
+
+[[channels]]
+name = "general"
+description = "General feedback."
+sinks = ["log"]
+
+[providers.bad]
+message = "999999999999999999999999999999999999999999"
+
+[[sinks]]
+type = "jsonl"
+name = "log"
+"#;
+        let error = AppConfig::from_toml_str(overflowing_root_index)
+            .expect_err("overflowing root index should fail");
+        assert!(matches!(
+            error.into_validation(),
+            Some(ConfigValidationError::InvalidWebhookProviderPath { .. })
+        ));
     }
 
     /// Rejects channels that would double-write the shared JSONL log file.

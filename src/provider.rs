@@ -149,7 +149,8 @@ impl OutputPath {
             if segment.is_empty() {
                 return Err(());
             }
-            if let Ok(array_index) = segment.parse::<usize>() {
+            if segment.bytes().all(|byte| byte.is_ascii_digit()) {
+                let array_index = segment.parse::<usize>().map_err(|_| ())?;
                 if index == 0 || array_index > MAX_PROVIDER_ARRAY_INDEX {
                     return Err(());
                 }
