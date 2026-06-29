@@ -37,6 +37,7 @@ use crate::types::{SinkDeliveryStatus, VentEvent};
 
 const JSONL_FILE_NAME: &str = "vents.jsonl";
 
+/// Fans one vent event to the sinks configured for its channel.
 #[derive(Clone)]
 pub(crate) struct SinkDispatcher {
     config: Arc<RuntimeConfig>,
@@ -328,15 +329,17 @@ fn webhook_secret_values(config: &WebhookSinkConfig, headers: &HeaderMap) -> Vec
     values
 }
 
+/// Redacts known webhook secrets from error-body previews before returning them to callers.
 #[cfg(feature = "webhook")]
 fn sanitize_webhook_error_body(body: &str, secret_values: &[String]) -> String {
     const MAX_PREVIEW_CHARS: usize = 512;
 
     let mut sanitized = body.to_string();
-    for secret in secret_values {
-        if secret.len() >= 4 {
-            sanitized = sanitized.replace(secret, "[redacted]");
-        }
+    // Redact longest secrets first so shorter substrings cannot survive replacement.
+    let mut secrets: Vec<&String> = secret_values.iter().filter(|s| !s.is_empty()).collect();
+    secrets.sort_by_key(|secret| std::cmp::Reverse(secret.len()));
+    for secret in secrets {
+        sanitized = sanitized.replace(secret.as_str(), "[redacted]");
     }
 
     let normalized = sanitized.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -667,5 +670,21 @@ mod tests {
         assert!(message.contains("[redacted]"));
         assert!(!message.contains("secret-token-value"));
         assert!(message.len() < 600);
+    }
+
+    /// Short URL and header secrets are still redacted from webhook error previews.
+    #[test]
+    #[cfg(feature = "webhook")]
+    fn webhook_status_errors_redact_short_secrets() {
+        let secrets = vec!["abc".to_string(), "xy".to_string(), String::new()];
+        let message = super::webhook_status_error(
+            reqwest::StatusCode::UNAUTHORIZED,
+            Some("invalid token abc for header xy"),
+            &secrets,
+        );
+
+        assert!(!message.contains("abc"));
+        assert!(!message.contains("xy"));
+        assert!(message.contains("[redacted]"));
     }
 }

@@ -14,12 +14,14 @@ use rmcp::schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+/// One configured vent channel exposed to MCP clients.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct ChannelInfo {
     pub name: String,
     pub description: String,
 }
 
+/// Channel catalog returned by the `list_channels` MCP tool.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ListChannelsOutput {
@@ -27,17 +29,20 @@ pub struct ListChannelsOutput {
     pub channels: Vec<ChannelInfo>,
 }
 
+/// `vent` tool input when multiple channels are configured.
 #[derive(Debug, Clone, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct VentInput {
     pub message: String,
     pub channel: Option<String>,
 }
 
+/// Narrowed `vent` tool input when only the default channel exists.
 #[derive(Debug, Clone, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct VentDefaultChannelInput {
     pub message: String,
 }
 
+/// MCP acknowledgement for an accepted or rejected vent request.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct VentOutput {
@@ -49,6 +54,7 @@ pub struct VentOutput {
     pub error: Option<String>,
 }
 
+/// Per-sink delivery outcome produced while fanning one event to a channel route.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct SinkDeliveryStatus {
     pub sink: String,
@@ -57,6 +63,7 @@ pub struct SinkDeliveryStatus {
     pub message: Option<String>,
 }
 
+/// Short base62 trace id assigned once per accepted vent event.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Hash)]
 #[serde(transparent)]
 pub struct EventId(String);
@@ -80,6 +87,7 @@ impl std::fmt::Display for EventId {
     }
 }
 
+/// Canonical vent record written to JSONL and rendered into webhook payloads.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct VentEvent {
     pub id: EventId,
@@ -107,6 +115,7 @@ impl VentEvent {
     }
 }
 
+/// Returns the first sink failure message for caller-facing error reporting.
 #[must_use]
 pub fn first_delivery_error(statuses: &[SinkDeliveryStatus]) -> Option<String> {
     statuses.iter().find(|status| !status.ok).map(|status| {

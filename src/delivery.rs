@@ -11,12 +11,14 @@ use crate::config::RuntimeConfig;
 use crate::sinks::SinkDispatcher;
 use crate::types::{first_delivery_error, ListChannelsOutput, VentEvent, VentOutput};
 
+/// Trimmed vent message and optional channel override for delivery.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VentRequest {
     pub message: String,
     pub channel: Option<String>,
 }
 
+/// Validates vent input and dispatches one event through configured channel sinks.
 #[derive(Clone)]
 pub struct VentService {
     config: Arc<RuntimeConfig>,
@@ -25,6 +27,7 @@ pub struct VentService {
 }
 
 impl VentService {
+    /// Builds a service from validated runtime config and a project directory label.
     #[must_use]
     pub fn new(config: RuntimeConfig, project: String) -> Self {
         let dispatcher = SinkDispatcher::new(Arc::new(config));
@@ -41,11 +44,13 @@ impl VentService {
         &self.config
     }
 
+    /// Returns configured channels and the default channel name.
     #[must_use]
     pub fn list_channels(&self) -> ListChannelsOutput {
         self.config.channel_list()
     }
 
+    /// Trims input, enforces channel policy, dispatches one event, and reports the first sink failure.
     pub async fn send(&self, request: VentRequest) -> VentOutput {
         let message = request.message.trim();
         if message.is_empty() {

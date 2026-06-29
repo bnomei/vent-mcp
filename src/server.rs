@@ -14,6 +14,7 @@ use crate::config::RuntimeConfig;
 use crate::delivery::{VentRequest, VentService};
 use crate::types::{ListChannelsOutput, VentDefaultChannelInput, VentInput, VentOutput};
 
+/// MCP server that exposes channel metadata and vent submission tools.
 #[derive(Clone)]
 pub struct VentMcpServer {
     service: VentService,

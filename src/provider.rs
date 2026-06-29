@@ -1,7 +1,8 @@
 //! Webhook provider template validation and rendering.
 //!
-//! TOML keeps provider mappings as strings, but runtime delivery uses compiled
-//! paths so each webhook send does only JSON rendering, not path validation.
+//! Provider mappings are validated at config load and compiled into dotted output
+//! paths. Runtime delivery only renders JSON, so malformed paths, colliding
+//! prefixes, and oversized array indices must be rejected before the server starts.
 
 #[cfg(feature = "webhook")]
 use serde_json::{Map, Value};
@@ -12,6 +13,10 @@ use crate::config::{RuntimeConfig, WebhookSinkConfig};
 #[cfg(feature = "webhook")]
 use crate::types::VentEvent;
 
+/// Maximum numeric array index allowed in provider output paths.
+const MAX_PROVIDER_ARRAY_INDEX: usize = 64;
+
+/// Compiled webhook field mappings for one named provider.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ProviderTemplate {
     field_label_key: Option<String>,
@@ -19,6 +24,7 @@ pub(crate) struct ProviderTemplate {
 }
 
 impl ProviderTemplate {
+    /// Validates and compiles one provider's event-field-to-output-path mappings.
     pub(crate) fn compile(
         provider_name: &str,
         provider: &WebhookProviderConfig,
@@ -41,7 +47,7 @@ impl ProviderTemplate {
                 },
             )?;
 
-        let mut target_paths = std::collections::BTreeSet::new();
+        let mut target_paths: Vec<String> = Vec::with_capacity(provider.fields.len());
         let mut fields = Vec::with_capacity(provider.fields.len());
         for (field, path) in &provider.fields {
             if !is_event_field(field) {
@@ -58,12 +64,24 @@ impl ProviderTemplate {
                     path: path.clone(),
                 }
             })?;
-            if !target_paths.insert(output_path.canonical()) {
-                return Err(ConfigValidationError::DuplicateWebhookProviderPath {
-                    provider: provider_name.to_string(),
-                    path: path.clone(),
-                });
+            let canonical = output_path.canonical();
+            for existing in &target_paths {
+                if existing == &canonical {
+                    return Err(ConfigValidationError::DuplicateWebhookProviderPath {
+                        provider: provider_name.to_string(),
+                        path: path.clone(),
+                    });
+                }
+                // Parent and descendant paths overwrite each other during render.
+                if is_path_ancestor(existing, &canonical) || is_path_ancestor(&canonical, existing)
+                {
+                    return Err(ConfigValidationError::CollidingWebhookProviderPath {
+                        provider: provider_name.to_string(),
+                        path: path.clone(),
+                    });
+                }
             }
+            target_paths.push(canonical);
 
             fields.push(ProviderFieldMapping {
                 field: field.clone(),
@@ -77,6 +95,7 @@ impl ProviderTemplate {
         })
     }
 
+    /// Renders a provider-shaped webhook JSON payload from one vent event.
     #[cfg(feature = "webhook")]
     pub(crate) fn render(&self, event: &VentEvent) -> Result<Value, String> {
         let event_json = serde_json::to_value(event)
@@ -130,8 +149,9 @@ impl OutputPath {
             if segment.is_empty() {
                 return Err(());
             }
-            if let Ok(array_index) = segment.parse::<usize>() {
-                if index == 0 {
+            if segment.bytes().all(|byte| byte.is_ascii_digit()) {
+                let array_index = segment.parse::<usize>().map_err(|_| ())?;
+                if index == 0 || array_index > MAX_PROVIDER_ARRAY_INDEX {
                     return Err(());
                 }
                 segments.push(PathSegment::Index(array_index));
@@ -197,6 +217,13 @@ fn parse_path_key(segment: &str) -> Result<String, ()> {
     }
 }
 
+/// True when `ancestor` is a strict dotted prefix of `descendant`.
+fn is_path_ancestor(ancestor: &str, descendant: &str) -> bool {
+    descendant.len() > ancestor.len()
+        && descendant.starts_with(ancestor)
+        && descendant.as_bytes()[ancestor.len()] == b'.'
+}
+
 fn is_event_field(field: &str) -> bool {
     matches!(
         field,
@@ -204,6 +231,7 @@ fn is_event_field(field: &str) -> bool {
     )
 }
 
+/// Builds the webhook JSON body for one sink, using raw event JSON or a named provider.
 #[cfg(feature = "webhook")]
 pub(crate) fn webhook_payload(
     runtime_config: &RuntimeConfig,
@@ -241,6 +269,10 @@ fn insert_path_segments(
 
     match segment {
         PathSegment::Index(index) => {
+            // Defense in depth when a path bypassed compile-time index validation.
+            if *index > MAX_PROVIDER_ARRAY_INDEX {
+                return Err("webhook provider path array index out of bounds".to_string());
+            }
             let array = ensure_array(current)?;
             if array.len() <= *index {
                 array.resize(*index + 1, Value::Null);

@@ -25,6 +25,7 @@ const ENV_CONFIG: &str = "VENT_MCP_CONFIG";
 #[cfg(feature = "webhook")]
 const DEFAULT_WEBHOOK_TIMEOUT_MS: u64 = 10_000;
 
+/// Validated configuration loaded from disk with its resolved file path.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LoadedConfig {
     path: PathBuf,
@@ -96,6 +97,7 @@ impl LoadedConfig {
     }
 }
 
+/// Normalized runtime policy derived from validated TOML configuration.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RuntimeConfig {
     default_channel: String,
@@ -133,7 +135,7 @@ impl RuntimeConfig {
             .enumerate()
             .map(|(index, sink)| (sink.name().to_string(), index))
             .collect();
-        let jsonl_dir = resolve_jsonl_dir(&logging, &config_dir);
+        let jsonl_dir = resolve_jsonl_dir(&logging, &config_dir)?;
 
         Ok(Self {
             default_channel,
@@ -148,21 +150,25 @@ impl RuntimeConfig {
         })
     }
 
+    /// Returns the channel used when callers omit an explicit channel.
     #[must_use]
     pub fn default_channel(&self) -> &str {
         &self.default_channel
     }
 
+    /// Reports whether a channel name is configured.
     #[must_use]
     pub fn has_channel(&self, name: &str) -> bool {
         self.channels.iter().any(|channel| channel.name == name)
     }
 
+    /// True when only the default channel exists and channel choice can be hidden.
     #[must_use]
     pub fn has_only_default_channel(&self) -> bool {
         self.channels.len() == 1 && self.channels[0].name == self.default_channel
     }
 
+    /// Builds the channel catalog exposed by the `list_channels` MCP tool.
     #[must_use]
     pub fn channel_list(&self) -> crate::types::ListChannelsOutput {
         crate::types::ListChannelsOutput {
@@ -218,6 +224,7 @@ impl RuntimeConfig {
     }
 }
 
+/// Top-level TOML configuration shape for channels, sinks, providers, and logging.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default, deny_unknown_fields)]
 pub struct AppConfig {
@@ -353,7 +360,16 @@ impl AppConfig {
             }
         }
 
+        // All jsonl sinks share one vents.jsonl file, so a channel may reference at most one.
+        let jsonl_sink_names: BTreeSet<&str> = self
+            .sinks
+            .iter()
+            .filter(|sink| matches!(sink, SinkConfig::Jsonl(_)))
+            .map(SinkConfig::name)
+            .collect();
+
         for channel in &self.channels {
+            let mut jsonl_in_channel = 0;
             for sink in &channel.sinks {
                 if !sink_names.contains(sink.as_str()) {
                     return Err(ConfigValidationError::UnknownChannelSink {
@@ -361,6 +377,14 @@ impl AppConfig {
                         sink: sink.clone(),
                     });
                 }
+                if jsonl_sink_names.contains(sink.as_str()) {
+                    jsonl_in_channel += 1;
+                }
+            }
+            if jsonl_in_channel > 1 {
+                return Err(ConfigValidationError::MultipleJsonlSinksInChannel {
+                    channel: channel.name.clone(),
+                });
             }
         }
 
@@ -368,12 +392,14 @@ impl AppConfig {
     }
 }
 
+/// JSONL storage location overrides for persisted vent records.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(default, deny_unknown_fields)]
 pub struct LoggingConfig {
     pub jsonl_dir: Option<String>,
 }
 
+/// One named vent channel and the sinks that receive its events.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct ChannelConfig {
@@ -383,6 +409,7 @@ pub struct ChannelConfig {
     pub sinks: Vec<String>,
 }
 
+/// Concrete delivery destination referenced by channel routes.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "lowercase", deny_unknown_fields)]
 pub enum SinkConfig {
@@ -417,12 +444,14 @@ impl SinkConfig {
     }
 }
 
+/// JSONL sink definition that appends vent records to the shared log file.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(default, deny_unknown_fields)]
 pub struct JsonlSinkConfig {
     pub name: String,
 }
 
+/// HTTP webhook sink with optional provider shaping and env-backed headers.
 #[cfg(feature = "webhook")]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default, deny_unknown_fields)]
@@ -513,6 +542,7 @@ impl WebhookSinkConfig {
     }
 }
 
+/// Maps vent event fields onto dotted webhook JSON output paths.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(default)]
 pub struct WebhookProviderConfig {
@@ -531,6 +561,7 @@ impl WebhookProviderConfig {
     }
 }
 
+/// Webhook header populated from a named environment variable at send time.
 #[cfg(feature = "webhook")]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -539,12 +570,14 @@ pub struct WebhookHeaderConfig {
     pub env: String,
 }
 
+/// Resolved config file path and the lookup rule that selected it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedConfigPath {
     pub path: PathBuf,
     pub source: ConfigPathSource,
 }
 
+/// Why a config path was chosen during environment-based resolution.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConfigPathSource {
     Env,
@@ -552,6 +585,7 @@ pub enum ConfigPathSource {
     Home,
 }
 
+/// Errors while resolving, reading, parsing, or bootstrapping configuration files.
 #[derive(Debug, Error)]
 pub enum ConfigError {
     #[error("home directory is not set")]
@@ -586,6 +620,7 @@ pub enum ConfigError {
     },
 }
 
+/// Policy violations detected while validating TOML configuration.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ConfigValidationError {
     #[error("channels must contain at least one channel")]
@@ -642,6 +677,16 @@ pub enum ConfigValidationError {
     },
     #[error("duplicate webhook provider output path in {provider}: {path}")]
     DuplicateWebhookProviderPath { provider: String, path: String },
+    #[error(
+        "webhook provider output path in {provider} collides with another mapped path: {path}"
+    )]
+    CollidingWebhookProviderPath { provider: String, path: String },
+    #[error("cannot expand home-relative jsonl_dir because HOME is not set: {path}")]
+    JsonlDirHomeNotSet { path: String },
+    #[error(
+        "channel {channel} references multiple jsonl sinks, which would write duplicate records to the shared log file"
+    )]
+    MultipleJsonlSinksInChannel { channel: String },
 }
 
 /// Resolves the active configuration path from process environment.
@@ -709,26 +754,40 @@ fn config_dir_for_path(path: &Path) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
-fn resolve_jsonl_dir(logging: &LoggingConfig, config_dir: &Path) -> PathBuf {
-    logging
+fn resolve_jsonl_dir(
+    logging: &LoggingConfig,
+    config_dir: &Path,
+) -> Result<PathBuf, ConfigValidationError> {
+    // Empty or whitespace jsonl_dir falls back to the config directory, not CWD.
+    let Some(value) = logging
         .jsonl_dir
         .as_deref()
-        .map(expand_tilde)
-        .unwrap_or_else(|| config_dir.to_path_buf())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(config_dir.to_path_buf());
+    };
+
+    expand_tilde(value).map_err(|()| ConfigValidationError::JsonlDirHomeNotSet {
+        path: value.to_string(),
+    })
 }
 
-fn expand_tilde(value: &str) -> PathBuf {
+fn expand_tilde(value: &str) -> Result<PathBuf, ()> {
+    expand_tilde_with(value, home_dir())
+}
+
+fn expand_tilde_with(value: &str, home: Option<PathBuf>) -> Result<PathBuf, ()> {
+    // Home-relative paths error when HOME is unset instead of writing under literal ~/… .
     if value == "~" {
-        return home_dir().unwrap_or_else(|| PathBuf::from(value));
+        return home.ok_or(());
     }
 
     if let Some(rest) = value.strip_prefix("~/") {
-        if let Some(home) = home_dir() {
-            return home.join(rest);
-        }
+        return home.map(|home| home.join(rest)).ok_or(());
     }
 
-    Path::new(value).to_path_buf()
+    Ok(Path::new(value).to_path_buf())
 }
 
 fn home_dir() -> Option<PathBuf> {
@@ -1265,6 +1324,166 @@ name = "log"
             error.into_validation(),
             Some(ConfigValidationError::InvalidWebhookProviderPath { .. })
         ));
+
+        let colliding_path = r#"
+default_channel = "general"
+
+[[channels]]
+name = "general"
+description = "General feedback."
+sinks = ["log"]
+
+[providers.bad]
+message = "payload.body"
+project = "payload"
+
+[[sinks]]
+type = "jsonl"
+name = "log"
+"#;
+        let error =
+            AppConfig::from_toml_str(colliding_path).expect_err("colliding path should fail");
+        assert!(matches!(
+            error.into_validation(),
+            Some(ConfigValidationError::CollidingWebhookProviderPath { .. })
+        ));
+
+        let oversized_index = r#"
+default_channel = "general"
+
+[[channels]]
+name = "general"
+description = "General feedback."
+sinks = ["log"]
+
+[providers.bad]
+message = "items.5000000"
+
+[[sinks]]
+type = "jsonl"
+name = "log"
+"#;
+        let error =
+            AppConfig::from_toml_str(oversized_index).expect_err("oversized index should fail");
+        assert!(matches!(
+            error.into_validation(),
+            Some(ConfigValidationError::InvalidWebhookProviderPath { .. })
+        ));
+
+        let overflowing_index = r#"
+default_channel = "general"
+
+[[channels]]
+name = "general"
+description = "General feedback."
+sinks = ["log"]
+
+[providers.bad]
+message = "items.999999999999999999999999999999999999999999"
+
+[[sinks]]
+type = "jsonl"
+name = "log"
+"#;
+        let error =
+            AppConfig::from_toml_str(overflowing_index).expect_err("overflowing index should fail");
+        assert!(matches!(
+            error.into_validation(),
+            Some(ConfigValidationError::InvalidWebhookProviderPath { .. })
+        ));
+
+        let overflowing_root_index = r#"
+default_channel = "general"
+
+[[channels]]
+name = "general"
+description = "General feedback."
+sinks = ["log"]
+
+[providers.bad]
+message = "999999999999999999999999999999999999999999"
+
+[[sinks]]
+type = "jsonl"
+name = "log"
+"#;
+        let error = AppConfig::from_toml_str(overflowing_root_index)
+            .expect_err("overflowing root index should fail");
+        assert!(matches!(
+            error.into_validation(),
+            Some(ConfigValidationError::InvalidWebhookProviderPath { .. })
+        ));
+    }
+
+    /// Rejects channels that would double-write the shared JSONL log file.
+    #[test]
+    fn channel_with_multiple_jsonl_sinks_is_rejected() {
+        let config = r#"
+default_channel = "feedback"
+
+[[channels]]
+name = "feedback"
+description = "Feedback."
+sinks = ["log", "audit"]
+
+[[sinks]]
+type = "jsonl"
+name = "log"
+
+[[sinks]]
+type = "jsonl"
+name = "audit"
+"#;
+        let error =
+            AppConfig::from_toml_str(config).expect_err("duplicate jsonl sinks should fail");
+        assert!(matches!(
+            error.into_validation(),
+            Some(ConfigValidationError::MultipleJsonlSinksInChannel { .. })
+        ));
+    }
+
+    /// Empty or omitted jsonl_dir anchors JSONL output beside the config file.
+    #[test]
+    fn empty_jsonl_dir_falls_back_to_config_dir() {
+        let config_dir = PathBuf::from("/home/user/.config/vent-mcp");
+
+        for value in [None, Some(String::new()), Some("   ".to_string())] {
+            let logging = super::LoggingConfig { jsonl_dir: value };
+            assert_eq!(
+                super::resolve_jsonl_dir(&logging, &config_dir).expect("should resolve"),
+                config_dir,
+                "empty/omitted jsonl_dir should anchor to the config directory"
+            );
+        }
+
+        let explicit = super::LoggingConfig {
+            jsonl_dir: Some("/var/log/vent".to_string()),
+        };
+        assert_eq!(
+            super::resolve_jsonl_dir(&explicit, &config_dir).expect("should resolve"),
+            PathBuf::from("/var/log/vent")
+        );
+    }
+
+    /// Tilde jsonl_dir paths fail closed when HOME cannot be resolved.
+    #[test]
+    fn tilde_expansion_without_home_errors() {
+        let home = Some(PathBuf::from("/home/user"));
+        assert_eq!(
+            super::expand_tilde_with("~/.local/state/vent-mcp", home.clone()).expect("has home"),
+            PathBuf::from("/home/user/.local/state/vent-mcp")
+        );
+        assert_eq!(
+            super::expand_tilde_with("~", home).expect("has home"),
+            PathBuf::from("/home/user")
+        );
+
+        assert!(super::expand_tilde_with("~/.local/state/vent-mcp", None).is_err());
+        assert!(super::expand_tilde_with("~", None).is_err());
+        assert_eq!(
+            super::expand_tilde_with("/var/log/vent", None).expect("absolute"),
+            PathBuf::from("/var/log/vent")
+        );
     }
 
     /// Verifies implicit default config paths are created on first load.
